@@ -10,7 +10,6 @@ import com.lightningds.core.upnp.ControlPoint
 import com.lightningds.core.upnp.Xml
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -134,15 +133,12 @@ class FakeDeviceTest {
             assertTrue(calls.first { it.startsWith("SeekId") }.contains("<Value>100</Value>"))
 
             // GENA: wait for the playlist subscription, then send a NOTIFY to our event server.
-            withTimeout(15000) { while (callbacks.none()) delay(50) }
+            waitFor("SUBSCRIBE received") { callbacks.isNotEmpty() }
             val port = cp.events.port
             val sid = "uuid:sub-Playlist"
-            withTimeout(15000) {
-                while (true) {
-                    sendNotify(port, sid, "<TransportState>Playing</TransportState>")
-                    delay(100)
-                    if (renderer.state.value.transport.name == "PLAYING") break
-                }
+            waitFor("transport PLAYING via NOTIFY (port=$port callbacks=$callbacks)", { renderer.state.value.toString() }) {
+                runCatching { sendNotify(port, sid, "<TransportState>Playing</TransportState>") }.onFailure { println("notify failed: $it") }
+                renderer.state.value.transport.name == "PLAYING"
             }
             renderer.close()
 
@@ -155,6 +151,15 @@ class FakeDeviceTest {
         } finally {
             cp.stop()
         }
+    }
+
+    private suspend fun waitFor(what: String, detail: () -> String = { "" }, cond: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 15_000
+        while (System.currentTimeMillis() < deadline) {
+            if (cond()) return
+            delay(100)
+        }
+        throw AssertionError("Timed out waiting for $what. ${detail()}")
     }
 
     private fun sendNotify(port: Int, sid: String, prop: String) {
