@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.SubcomposeAsyncImage
 import com.lightningds.app.AppController
 import com.lightningds.app.R
@@ -355,7 +356,7 @@ fun pluralSongs(n: Int): String = androidx.compose.ui.res.pluralStringResource(R
 fun pluralAlbums(n: Int): String = androidx.compose.ui.res.pluralStringResource(R.plurals.albums_count, n, n)
 
 @Composable
-fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateCompat() = androidx.lifecycle.compose.collectAsStateWithLifecycle(this)
+fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateCompat(): androidx.compose.runtime.State<T> = collectAsStateWithLifecycle()
 
 /** Result of an asynchronous load in a composable. */
 sealed interface Load<out T> {

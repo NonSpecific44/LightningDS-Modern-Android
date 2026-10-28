@@ -64,7 +64,7 @@ import kotlinx.coroutines.coroutineScope
 
 private enum class Scope { ALL, LIBRARY, STREAMING, RADIO }
 
-private data class Results(
+private data class SearchResults(
     val library: LibraryIndex.SearchHits?,
     val streaming: StreamSearchResult?,
     val streamingService: String?,
@@ -145,7 +145,7 @@ private fun Results(query: String, scope: Scope) {
             val libHits = if (scope == Scope.ALL || scope == Scope.LIBRARY) lib?.let { LibraryIndex.search(it, query) } else null
             val stream = if ((scope == Scope.ALL || scope == Scope.STREAMING) && service != null) async { runCatching { service.search(query) }.getOrNull() } else null
             val radio = if (scope == Scope.ALL || scope == Scope.RADIO) async { runCatching { c.radio.search(query, 30) }.getOrDefault(emptyList()) } else null
-            Results(libHits, stream?.await(), service?.name, radio?.await().orEmpty())
+            SearchResults(libHits, stream?.await(), service?.name, radio?.await().orEmpty())
         }
     }
     LoadContent(loader) { r ->

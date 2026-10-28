@@ -1,6 +1,5 @@
 package com.lightningds.app.ui
 
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -112,7 +111,7 @@ private enum class TopLevel(val route: String, val label: Int, val icon: ImageVe
     SEARCH("search", R.string.nav_search, Icons.Default.Search),
 }
 
-private fun NavBackStackEntry.arg(name: String): String = Uri.decode(arguments?.getString(name).orEmpty())
+private fun NavBackStackEntry.arg(name: String): String = arguments?.getString(name).orEmpty()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -148,7 +147,9 @@ fun LightningAppUi() {
         Navigator(navigate = { nav.navigate(it) { launchSingleTop = true } }, back = { nav.popBackStack() })
     }
     val topLevel = TopLevel.entries.firstOrNull { it.route == route }
-    val currentTop = topLevel ?: TopLevel.entries.firstOrNull { t -> nav.currentBackStack.value.any { it.destination.route == t.route } } ?: TopLevel.LIBRARY
+    var lastTop by rememberSaveable { mutableStateOf(TopLevel.LIBRARY) }
+    if (topLevel != null && topLevel != lastTop) lastTop = topLevel
+    val currentTop = topLevel ?: lastTop
 
     PasscodeDialogHost()
     if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false }, onSettings = { showDevices = false; navigator.navigate("settings") })

@@ -87,22 +87,22 @@ fun ServerSettingsScreen(udn: String) {
         }
     }
     var dialog by remember { mutableStateOf<String?>(null) }
-    fun apply(block: suspend () -> Unit) = c.launchIo { block(); delay(500); loader.reload() }
+    fun change(block: suspend () -> Unit) = c.launchIo { block(); delay(500); loader.reload() }
 
     LoadContent(loader) { st ->
         when (dialog) {
             "name" -> TextInputDialog(stringResource(R.string.server_name), initial = item?.name.orEmpty(), onDismiss = { dialog = null }, onConfirm = {
                 dialog = null
-                apply { cfg.setName(it.trim()) }
+                change { cfg.setName(it.trim()) }
             })
             "mode" -> ChoiceDialog(
                 stringResource(R.string.music_storage),
                 st.modes?.modes.orEmpty().map { it.type to it.name.ifBlank { it.type } },
-                st.modes?.current, { dialog = null }, { m -> apply { cfg.setWorkMode(m) } },
+                st.modes?.current, { dialog = null }, { m -> change { cfg.setWorkMode(m) } },
             )
             "smb" -> SmbDialog(st.smb, onDismiss = { dialog = null }) { smb ->
                 dialog = null
-                apply {
+                change {
                     cfg.setSmbConfig(smb)
                     runCatching { cfg.mount() }
                 }
@@ -145,12 +145,12 @@ fun ServerSettingsScreen(udn: String) {
             st.progress?.takeIf { it.isNotBlank() }?.let { item { SettingRow(stringResource(R.string.scan_progress, it), null, Icons.Default.Refresh) } }
             item {
                 SettingRow(stringResource(R.string.rescan), null, Icons.Default.Refresh, onClick = {
-                    apply { cfg.rescan() }
+                    change { cfg.rescan() }
                     c.toast(c.string(R.string.rescan_started))
                 })
             }
-            item { SettingRow(stringResource(R.string.mount), null, Icons.Default.Usb, onClick = { apply { cfg.mount() } }) }
-            item { SettingRow(stringResource(R.string.unmount), null, Icons.Default.Eject, onClick = { apply { cfg.unmount() } }) }
+            item { SettingRow(stringResource(R.string.mount), null, Icons.Default.Usb, onClick = { change { cfg.mount() } }) }
+            item { SettingRow(stringResource(R.string.unmount), null, Icons.Default.Eject, onClick = { change { cfg.unmount() } }) }
             item { SettingRow(stringResource(R.string.refresh_cache), null, Icons.Default.Refresh, onClick = { c.selectServer(udn); c.syncLibrary() }) }
         }
     }

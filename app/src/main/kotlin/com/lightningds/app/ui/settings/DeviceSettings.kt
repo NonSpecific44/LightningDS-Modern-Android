@@ -109,7 +109,7 @@ fun DeviceSettingsScreen(udn: String) {
     val loader = rememberLoad(udn) { load(cfg) }
     var dialog by remember { mutableStateOf<String?>(null) }
 
-    fun apply(block: suspend () -> Unit) = c.launchIo {
+    fun change(block: suspend () -> Unit) = c.launchIo {
         block()
         delay(400)
         loader.reload()
@@ -119,26 +119,26 @@ fun DeviceSettingsScreen(udn: String) {
         when (dialog) {
             "name" -> TextInputDialog(stringResource(R.string.device_name), initial = item?.name.orEmpty(), onDismiss = { dialog = null }, onConfirm = {
                 dialog = null
-                apply { cfg.setRoomName(it.trim()) }
+                change { cfg.setRoomName(it.trim()) }
             })
             "mode" -> ChoiceDialog(
                 stringResource(R.string.operating_mode),
                 listOf(LightningConfig.MODE_OPENHOME to stringResource(R.string.mode_openhome), LightningConfig.MODE_UPNP to stringResource(R.string.mode_upnp)),
-                d.mode, { dialog = null }, { m -> apply { cfg.setUpnpType(m) }; c.toast(c.string(R.string.mode_change_note)) },
+                d.mode, { dialog = null }, { m -> change { cfg.setUpnpType(m) }; c.toast(c.string(R.string.mode_change_note)) },
             )
             "delay" -> ChoiceDialog(
                 stringResource(R.string.dac_delay),
                 LightningConfig.DAC_DELAYS.map { it to if (it == 0) c.string(R.string.off) else c.resources().getQuantityString(R.plurals.seconds, it, it) },
-                d.delay, { dialog = null }, { s -> apply { cfg.setWaitingTime(s) } },
+                d.delay, { dialog = null }, { s -> change { cfg.setWaitingTime(s) } },
             )
             "output" -> ChoiceDialog(
                 stringResource(R.string.output_channel),
                 d.outputs?.channels.orEmpty().map { it.device to it.name.ifBlank { it.device } },
-                d.outputs?.current, { dialog = null }, { ch -> apply { cfg.setOutputChannel(ch) } },
+                d.outputs?.current, { dialog = null }, { ch -> change { cfg.setOutputChannel(ch) } },
             )
             "passcode" -> PasscodeSetupDialog(onDismiss = { dialog = null }) { code ->
                 dialog = null
-                apply {
+                change {
                     cfg.setPasscode(true, code)
                     c.settings.setUnlocked(udn, code)
                 }
@@ -153,7 +153,7 @@ fun DeviceSettingsScreen(udn: String) {
             item { SectionHeader(stringResource(R.string.device_passcode)) }
             item {
                 SwitchRow(stringResource(R.string.passcode), null, d.passcode?.protected == true, Icons.Default.Lock, enabled = d.passcode != null) { on ->
-                    if (on) dialog = "passcode" else apply { cfg.setPasscode(false, d.passcode?.passcode.orEmpty()) }
+                    if (on) dialog = "passcode" else change { cfg.setPasscode(false, d.passcode?.passcode.orEmpty()) }
                 }
             }
             if (d.passcode?.protected == true) item { SettingRow(stringResource(R.string.change_passcode), null, Icons.Default.Password, onClick = { dialog = "passcode" }) }
@@ -204,12 +204,12 @@ fun DeviceSettingsScreen(udn: String) {
             }
             item {
                 SwitchRow(stringResource(R.string.native_dsd), stringResource(R.string.native_dsd_desc), d.dsd?.nativeEnabled == true, Icons.Default.GraphicEq, enabled = d.dsd != null) { on ->
-                    apply { cfg.setDsdStatus(on, d.dsd?.sampleFormat.orEmpty()) }
+                    change { cfg.setDsdStatus(on, d.dsd?.sampleFormat.orEmpty()) }
                 }
             }
             item {
                 SwitchRow(stringResource(R.string.software_volume), stringResource(R.string.software_volume_desc), d.volumeControl == true, Icons.AutoMirrored.Filled.VolumeUp, enabled = d.volumeControl != null) { on ->
-                    apply {
+                    change {
                         cfg.setVolumeControl(on)
                         c.refreshVolumeControl()
                     }

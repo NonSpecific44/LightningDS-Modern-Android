@@ -91,7 +91,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private val writeScope = scope
 
     private fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
-        writeScope.launch { context.dataStore.edit(block) }
+        writeScope.launch { context.dataStore.edit { block(it) } }
     }
 
     private fun <T> androidx.datastore.preferences.core.MutablePreferences.setOrRemove(key: Preferences.Key<T>, value: T?) {
