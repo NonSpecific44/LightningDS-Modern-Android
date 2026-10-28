@@ -39,6 +39,10 @@ class EventServer(
 
     val port: Int get() = server?.localPort ?: 0
 
+    /** Optional diagnostics hook (subscription failures). */
+    @Volatile
+    var onError: ((String) -> Unit)? = null
+
     @Synchronized
     fun start() {
         if (server != null) return
@@ -132,6 +136,7 @@ class EventServer(
                 val timeout = try {
                     if (current == null) subscribeNew(url) else renew(url, current)
                 } catch (e: Exception) {
+                    onError?.invoke("GENA ${service.name}: ${e.javaClass.simpleName}: ${e.message}")
                     if (current != null) {
                         listeners.remove(current)
                         sid = null

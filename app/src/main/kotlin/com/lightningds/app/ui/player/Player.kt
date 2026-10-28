@@ -80,6 +80,7 @@ data class NowPlayingInfo(
 @Composable
 fun RendererState.info(): NowPlayingInfo {
     val src = currentSource
+    val track = track
     return when {
         src?.isRadio == true -> NowPlayingInfo(
             title = radioTrack?.title ?: track?.title ?: stringResource(R.string.playing_radio),

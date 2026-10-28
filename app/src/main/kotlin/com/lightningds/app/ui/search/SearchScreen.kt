@@ -143,8 +143,8 @@ private fun Results(query: String, scope: Scope) {
         coroutineScope {
             val lib = (libState as? LibraryState.Ready)?.library
             val libHits = if (scope == Scope.ALL || scope == Scope.LIBRARY) lib?.let { LibraryIndex.search(it, query) } else null
-            val stream = if ((scope == Scope.ALL || scope == Scope.STREAMING) && service != null) async { runCatching { service.search(query) }.getOrNull() } else null
-            val radio = if (scope == Scope.ALL || scope == Scope.RADIO) async { runCatching { c.radio.search(query, 30) }.getOrDefault(emptyList()) } else null
+            val stream: kotlinx.coroutines.Deferred<StreamSearchResult?>? = if ((scope == Scope.ALL || scope == Scope.STREAMING) && service != null) async { runCatching { service.search(query) }.getOrNull() } else null
+            val radio: kotlinx.coroutines.Deferred<List<RadioStation>>? = if (scope == Scope.ALL || scope == Scope.RADIO) async { runCatching { c.radio.search(query, 30) }.getOrDefault(emptyList()) } else null
             SearchResults(libHits, stream?.await(), service?.name, radio?.await().orEmpty())
         }
     }
@@ -157,9 +157,15 @@ private fun Results(query: String, scope: Scope) {
             EmptyState(Icons.Default.Search, stringResource(R.string.search_no_results) + "\n" + stringResource(R.string.search_no_results_prompt))
             return@LoadContent
         }
+        val tArtists = stringResource(R.string.artists)
+        val tAlbums = stringResource(R.string.albums)
+        val tTracks = stringResource(R.string.tracks)
+        val tPlaylists = stringResource(R.string.playlists)
+        val tStations = stringResource(R.string.stations)
+        val tLibrary = stringResource(R.string.search_library)
         LazyColumn(Modifier.fillMaxSize()) {
             r.library?.let { hits ->
-                section(stringResource(R.string.artists) + " · " + stringResource(R.string.search_library), hits.artists.take(limit)) { g ->
+                section(tArtists + " · " + tLibrary, hits.artists.take(limit)) { g ->
                     ListItem(
                         modifier = Modifier.clickable { nav.navigate(Routes.group(LibraryTab.ARTISTS, g.key)) },
                         leadingContent = { Artwork(g.artUri, size = 48.dp, shape = CircleShape, placeholder = Icons.Default.Person) },
@@ -167,7 +173,7 @@ private fun Results(query: String, scope: Scope) {
                         supportingContent = { Text(pluralAlbums(g.albums.size)) },
                     )
                 }
-                section(stringResource(R.string.albums) + " · " + stringResource(R.string.search_library), hits.albums.take(limit)) { a ->
+                section(tAlbums + " · " + tLibrary, hits.albums.take(limit)) { a ->
                     ListItem(
                         modifier = Modifier.clickable { nav.navigate(Routes.album(a.id)) },
                         leadingContent = { Artwork(a.artUri, size = 48.dp) },
@@ -175,20 +181,20 @@ private fun Results(query: String, scope: Scope) {
                         supportingContent = { Text(a.displayArtist, maxLines = 1) },
                     )
                 }
-                section(stringResource(R.string.tracks) + " · " + stringResource(R.string.search_library), hits.tracks.take(limit)) { t ->
+                section(tTracks + " · " + tLibrary, hits.tracks.take(limit)) { t ->
                     TrackRow(t, onClick = { c.play(listOf(t), InsertMode.PLAY_NOW) }, showArt = true, menu = queueActions({ listOf(t) }))
                 }
             }
             r.streaming?.let { s ->
                 val svc = r.streamingService ?: ""
-                section(stringResource(R.string.artists) + " · " + svc, s.artists.take(limit)) { a ->
+                section(tArtists + " · " + svc, s.artists.take(limit)) { a ->
                     ListItem(
                         modifier = Modifier.clickable { nav.navigate(StreamRoutes.artist(svc, a.id)) },
                         leadingContent = { Artwork(a.pictureUrl, size = 48.dp, shape = CircleShape, placeholder = Icons.Default.Person) },
                         headlineContent = { Text(a.name) },
                     )
                 }
-                section(stringResource(R.string.albums) + " · " + svc, s.albums.take(limit)) { a ->
+                section(tAlbums + " · " + svc, s.albums.take(limit)) { a ->
                     ListItem(
                         modifier = Modifier.clickable { nav.navigate(StreamRoutes.album(svc, a.id)) },
                         leadingContent = { Artwork(a.artUrl, size = 48.dp) },
@@ -196,10 +202,10 @@ private fun Results(query: String, scope: Scope) {
                         supportingContent = { Text(a.artist, maxLines = 1) },
                     )
                 }
-                section(stringResource(R.string.tracks) + " · " + svc, s.tracks.take(limit)) { t ->
+                section(tTracks + " · " + svc, s.tracks.take(limit)) { t ->
                     TrackRow(t, onClick = { c.play(listOf(t), InsertMode.PLAY_NOW) }, showArt = true, menu = queueActions({ listOf(t) }))
                 }
-                section(stringResource(R.string.playlists) + " · " + svc, s.playlists.take(limit)) { p ->
+                section(tPlaylists + " · " + svc, s.playlists.take(limit)) { p ->
                     ListItem(
                         modifier = Modifier.clickable { nav.navigate(StreamRoutes.playlist(svc, p.id)) },
                         leadingContent = { Artwork(p.artUrl, size = 48.dp, placeholder = Icons.AutoMirrored.Filled.PlaylistPlay) },
@@ -207,7 +213,7 @@ private fun Results(query: String, scope: Scope) {
                     )
                 }
             }
-            section(stringResource(R.string.stations), r.radio.take(if (scope == Scope.ALL) 5 else 100)) { StationRow(it) }
+            section(tStations, r.radio.take(if (scope == Scope.ALL) 5 else 100)) { StationRow(it) }
         }
     }
 }

@@ -82,7 +82,8 @@ fun DetailLayout(
     list: LazyListScope.() -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val wide = maxWidth >= 720.dp
+        val width = maxWidth
+        val wide = width >= 720.dp
         val header: @Composable (Modifier) -> Unit = { m ->
             Column(m.padding(16.dp), horizontalAlignment = if (wide) Alignment.Start else Alignment.CenterHorizontally) {
                 Artwork(art, Modifier.widthIn(max = if (wide) 360.dp else 260.dp).fillMaxWidth().aspectRatio(1f), shape = RoundedCornerShape(16.dp), placeholder = placeholder)
@@ -97,7 +98,7 @@ fun DetailLayout(
         }
         if (wide) {
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.width(maxWidth * 0.4f).verticalScroll(rememberScrollState())) { header(Modifier) }
+                Column(Modifier.width(width * 0.4f).verticalScroll(rememberScrollState())) { header(Modifier) }
                 LazyColumn(Modifier.weight(1f)) { list() }
             }
         } else {

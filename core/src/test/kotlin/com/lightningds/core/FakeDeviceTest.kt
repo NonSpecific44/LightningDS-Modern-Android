@@ -40,7 +40,7 @@ class FakeDeviceTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path.orEmpty()
                 if (request.method == "SUBSCRIBE") {
-                    request.getHeader("CALLBACK")?.let { callbacks += it }
+                    request.getHeader("CALLBACK")?.let { callbacks += "$path $it" }
                     return MockResponse().setHeader("SID", "uuid:sub-" + path.substringBefore("/event").trim('/')).setHeader("TIMEOUT", "Second-1800")
                 }
                 return when (path) {
@@ -102,6 +102,8 @@ class FakeDeviceTest {
     @Test
     fun discoveryConfigQueueAndEvents() = runBlocking {
         val cp = ControlPoint()
+        val errors = Collections.synchronizedList(mutableListOf<String>())
+        cp.events.onError = { errors += it }
         try {
             cp.fetch(server.url("/desc.xml").toString())
             val devices = cp.devices.value
@@ -133,10 +135,10 @@ class FakeDeviceTest {
             assertTrue(calls.first { it.startsWith("SeekId") }.contains("<Value>100</Value>"))
 
             // GENA: wait for the playlist subscription, then send a NOTIFY to our event server.
-            waitFor("SUBSCRIBE received") { callbacks.isNotEmpty() }
+            waitFor("Playlist SUBSCRIBE", { "callbacks=$callbacks errors=$errors" }) { callbacks.any { it.startsWith("/Playlist/") } }
             val port = cp.events.port
             val sid = "uuid:sub-Playlist"
-            waitFor("transport PLAYING via NOTIFY (port=$port callbacks=$callbacks)", { renderer.state.value.toString() }) {
+            waitFor("transport PLAYING via NOTIFY (port=$port)", { "callbacks=$callbacks errors=$errors state=${renderer.state.value}" }) {
                 runCatching { sendNotify(port, sid, "<TransportState>Playing</TransportState>") }.onFailure { println("notify failed: $it") }
                 renderer.state.value.transport.name == "PLAYING"
             }
