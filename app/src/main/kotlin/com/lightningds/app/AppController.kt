@@ -208,24 +208,16 @@ class AppController(private val context: Context) {
         d.firstOrNull { it.udn == s.rendererUdn }
     }.stateIn(scope, SharingStarted.Eagerly, null)
 
-    init {
-        // (Re)create the renderer whenever the selected device comes online.
-        scope.launch {
-            combine(settings.settings.map { it.rendererUdn }.distinctUntilChanged(), controlPoint.devices) { udn, map -> udn to map[udn] }
-                .distinctUntilChanged { a, b -> a.first == b.first && (a.second == null) == (b.second == null) && a.second?.description?.location == b.second?.description?.location }
-                .collect { (_, dev) -> attachRenderer(dev) }
-        }
-        scope.launch {
-            combine(settings.settings.map { it.serverUdn }.distinctUntilChanged(), controlPoint.devices.map { it.keys }.distinctUntilChanged()) { udn, keys ->
-                udn to (udn != null && udn in keys)
-            }.distinctUntilChanged().collect { (udn, online) -> onServerChanged(udn, online) }
-        }
-    }
-
-    private fun attachRenderer(dev: UpnpDevice?) {
+    private fun attachRenderer(udn: String?, dev: UpnpDevice?) {
         val current = _renderer.value
         if (dev == null) {
-            return // keep last state; it reconnects when the device returns
+            // Keep showing the last state while the same device is briefly offline; it reconnects
+            // when it comes back. A different (not yet discovered) selection clears it.
+            if (current != null && current.udn != udn) {
+                current.close()
+                _renderer.value = null
+            }
+            return
         }
         current?.close()
         if (!dev.isRenderer) { _renderer.value = null; return }
@@ -413,6 +405,21 @@ class AppController(private val context: Context) {
             throw e
         } catch (e: Exception) {
             toast(e.message ?: context.getString(R.string.operation_failed))
+        }
+    }
+
+    // Must stay last: collectors may run immediately and touch the properties above.
+    init {
+        // (Re)create the renderer whenever the selected device comes online.
+        scope.launch {
+            combine(settings.settings.map { it.rendererUdn }.distinctUntilChanged(), controlPoint.devices) { udn, map -> udn to map[udn] }
+                .distinctUntilChanged { a, b -> a.first == b.first && (a.second == null) == (b.second == null) && a.second?.description?.location == b.second?.description?.location }
+                .collect { (udn, dev) -> attachRenderer(udn, dev) }
+        }
+        scope.launch {
+            combine(settings.settings.map { it.serverUdn }.distinctUntilChanged(), controlPoint.devices.map { it.keys }.distinctUntilChanged()) { udn, keys ->
+                udn to (udn != null && udn in keys)
+            }.distinctUntilChanged().collect { (udn, online) -> onServerChanged(udn, online) }
         }
     }
 }
