@@ -155,7 +155,8 @@ class EventServer(
         private suspend fun subscribeNew(url: String): Int = withContext(Dispatchers.IO) {
             val host = URI(url).let { it.host to (if (it.port > 0) it.port else 80) }
             val local = localAddressFor(host.first, host.second)
-            val callback = "<http://${local.hostAddress}:$port/event>"
+            val hostPart = if (local is java.net.Inet6Address) "[${local.hostAddress.substringBefore('%')}]" else local.hostAddress
+            val callback = "<http://$hostPart:$port/event>"
             val req = Request.Builder().url(url)
                 .method("SUBSCRIBE", null)
                 .header("CALLBACK", callback)

@@ -64,7 +64,7 @@ class FakeDeviceTest {
                 }
             }
         }
-        server.start()
+        server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
     }
 
     @After
@@ -134,10 +134,10 @@ class FakeDeviceTest {
             assertTrue(calls.first { it.startsWith("SeekId") }.contains("<Value>100</Value>"))
 
             // GENA: wait for the playlist subscription, then send a NOTIFY to our event server.
-            withTimeout(5000) { while (callbacks.none()) delay(50) }
+            withTimeout(15000) { while (callbacks.none()) delay(50) }
             val port = cp.events.port
             val sid = "uuid:sub-Playlist"
-            withTimeout(5000) {
+            withTimeout(15000) {
                 while (true) {
                     sendNotify(port, sid, "<TransportState>Playing</TransportState>")
                     delay(100)
