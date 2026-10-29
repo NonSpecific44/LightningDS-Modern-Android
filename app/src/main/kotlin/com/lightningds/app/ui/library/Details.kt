@@ -144,7 +144,7 @@ fun AlbumScreen(albumId: String) {
             com.lightningds.app.ui.components.OverflowMenu(queueActions({ tracks }))
         },
     ) {
-        itemsIndexed(tracks, key = { i, t -> t.id + i }) { i, t ->
+        itemsIndexed(tracks, key = { i, t -> "$i:${t.id}" }) { i, t ->
             if (multiDisc && (i == 0 || tracks[i - 1].discNumber != t.discNumber)) {
                 Text("CD ${t.discNumber}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
             }
@@ -191,7 +191,7 @@ fun FolderBrowser(objectId: String, title: String?) {
                     supportingContent = f.artist?.let { { Text(it, maxLines = 1) } },
                 )
             }
-            itemsIndexed(page.items, key = { i, t -> "i" + t.id + i }) { i, t ->
+            itemsIndexed(page.items, key = { i, t -> "i$i:${t.id}" }) { i, t ->
                 TrackRow(t, onClick = { c.play(page.items, InsertMode.REPLACE, i) }, showArt = true, menu = queueActions({ listOf(t) }))
             }
         }
@@ -225,7 +225,7 @@ fun LocalPlaylistScreen(id: String) {
             IconButton(onClick = { deleting = true }) { Icon(Icons.Default.Delete, stringResource(R.string.delete_playlist)) }
         },
     ) {
-        itemsIndexed(p.tracks, key = { i, t -> t.id + i }) { i, t ->
+        itemsIndexed(p.tracks, key = { i, t -> "$i:${t.id}" }) { i, t ->
             if (editing) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TrackRow(t, onClick = {}, modifier = Modifier.weight(1f), index = i + 1)

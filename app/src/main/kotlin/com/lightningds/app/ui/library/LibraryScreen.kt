@@ -264,7 +264,7 @@ fun AlbumGrid(albums: List<Album>, centered: Boolean = false, header: (@Composab
 private fun SongList(tracks: List<com.lightningds.core.media.Track>) {
     val c = LocalController.current
     LazyColumn {
-        itemsIndexed(tracks, key = { i, t -> t.id + i }) { i, t ->
+        itemsIndexed(tracks, key = { i, t -> "$i:${t.id}" }) { i, t ->
             TrackRow(
                 t, onClick = { c.play(listOf(t), InsertMode.PLAY_NOW) }, showArt = true,
                 menu = queueActions({ listOf(t) }),

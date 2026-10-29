@@ -131,7 +131,8 @@ class EventServer(
             val url = service.info.eventSubUrl
             if (url.isBlank()) return
             var failures = 0
-            while (scope.isActive && job?.isActive == true) {
+            // Don't consult `job` here: this may start running before `job` is assigned.
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val current = sid
                 val timeout = try {
                     if (current == null) subscribeNew(url) else renew(url, current)

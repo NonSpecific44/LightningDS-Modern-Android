@@ -289,7 +289,7 @@ private fun GenresView(service: StreamingService) {
     val loader = rememberLoad(service.name, "genres") { service.genres() }
     LoadContent(loader) { genres ->
         LazyColumn {
-            items(genres, key = { it.id }) { g ->
+            items(genres) { g ->
                 ListItem(
                     modifier = Modifier.clickable { nav.navigate(StreamRoutes.genre(service.name, g.id, g.name)) },
                     leadingContent = { Artwork(g.artUrl, size = 48.dp, placeholder = Icons.Default.Category) },
@@ -337,7 +337,7 @@ fun StreamAlbumGrid(service: StreamingService, albums: List<StreamAlbum>, header
     }
     LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(10.dp), modifier = Modifier.fillMaxSize()) {
         if (header != null) item(span = { GridItemSpan(maxLineSpan) }) { header() }
-        items(albums, key = { it.id }) { a ->
+        items(albums) { a ->
             AlbumCard(a.title, listOfNotNull(a.artist.ifBlank { null }, a.year).joinToString(" · "), a.artUrl, onClick = { nav.navigate(StreamRoutes.album(service.name, a.id)) })
         }
     }
@@ -347,7 +347,7 @@ fun StreamAlbumGrid(service: StreamingService, albums: List<StreamAlbum>, header
 fun ArtistList(service: StreamingService, artists: List<StreamArtist>) {
     val nav = LocalNavigator.current
     LazyColumn {
-        items(artists, key = { it.id }) { a ->
+        items(artists) { a ->
             ListItem(
                 modifier = Modifier.clickable { nav.navigate(StreamRoutes.artist(service.name, a.id)) },
                 leadingContent = { Artwork(a.pictureUrl, size = 48.dp, shape = CircleShape, placeholder = Icons.Default.Person) },
@@ -361,7 +361,7 @@ fun ArtistList(service: StreamingService, artists: List<StreamArtist>) {
 fun PlaylistList(service: StreamingService, playlists: List<StreamPlaylist>) {
     val nav = LocalNavigator.current
     LazyColumn {
-        items(playlists, key = { it.id }) { p ->
+        items(playlists) { p ->
             ListItem(
                 modifier = Modifier.clickable { nav.navigate(StreamRoutes.playlist(service.name, p.id)) },
                 leadingContent = { Artwork(p.artUrl, size = 48.dp, placeholder = Icons.AutoMirrored.Filled.PlaylistPlay) },
@@ -376,7 +376,7 @@ fun PlaylistList(service: StreamingService, playlists: List<StreamPlaylist>) {
 fun StreamTrackList(service: StreamingService, tracks: List<Track>) {
     val c = LocalController.current
     LazyColumn {
-        itemsIndexed(tracks, key = { i, t -> t.id + i }) { i, t ->
+        itemsIndexed(tracks, key = { i, t -> "$i:${t.id}" }) { i, t ->
             TrackRow(t, onClick = { c.play(tracks, InsertMode.REPLACE, i) }, showArt = true, menu = streamTrackMenu(service, t))
         }
     }
@@ -445,7 +445,7 @@ fun StreamAlbumScreen(serviceName: String, id: String) {
                 }
             },
         ) {
-            itemsIndexed(d.tracks, key = { i, t -> t.id + i }) { i, t ->
+            itemsIndexed(d.tracks, key = { i, t -> "$i:${t.id}" }) { i, t ->
                 TrackRow(t, onClick = { c.play(d.tracks, InsertMode.REPLACE, i) }, index = if (t.trackNumber > 0) t.trackNumber else i + 1, menu = streamTrackMenu(service, t))
             }
         }
@@ -467,7 +467,7 @@ fun StreamPlaylistScreen(serviceName: String, id: String) {
             placeholder = Icons.AutoMirrored.Filled.PlaylistPlay,
             headerActions = { FavoriteToggle(service, FavoriteKind.PLAYLISTS, d.playlist.id) },
         ) {
-            itemsIndexed(d.tracks, key = { i, t -> t.id + i }) { i, t ->
+            itemsIndexed(d.tracks, key = { i, t -> "$i:${t.id}" }) { i, t ->
                 TrackRow(t, onClick = { c.play(d.tracks, InsertMode.REPLACE, i) }, showArt = true, menu = streamTrackMenu(service, t))
             }
         }
@@ -501,7 +501,7 @@ fun StreamArtistScreen(serviceName: String, id: String) {
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader(stringResource(R.string.albums)) }
             }
-            items(d.albums, key = { it.id }) { a ->
+            items(d.albums) { a ->
                 AlbumCard(a.title, a.year, a.artUrl, onClick = { nav.navigate(StreamRoutes.album(serviceName, a.id)) })
             }
         }

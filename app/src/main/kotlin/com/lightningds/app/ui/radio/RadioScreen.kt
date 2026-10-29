@@ -103,7 +103,7 @@ fun RadioScreen() {
 @Composable
 private fun CategoryList(items: List<RadioCategory>, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: (RadioCategory) -> Unit) {
     LazyColumn {
-        items(items, key = { it.code }) { g ->
+        items(items) { g ->
             ListItem(
                 modifier = Modifier.clickable { onClick(g) },
                 leadingContent = { Icon(icon, null) },
@@ -153,7 +153,7 @@ fun RadioCountryScreen(code: String) {
 @Composable
 fun StationList(stations: List<RadioStation>) {
     LazyColumn(Modifier.fillMaxSize()) {
-        items(stations, key = { it.id }) { StationRow(it) }
+        items(stations) { StationRow(it) }
         item {
             Text(stringResource(R.string.radio_directory_note), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
         }
