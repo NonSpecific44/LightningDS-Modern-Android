@@ -228,6 +228,8 @@ private fun titleFor(route: String?, entry: NavBackStackEntry?): String = when {
     route == "player" -> stringResource(R.string.now_playing)
     route == "queue" -> stringResource(R.string.queue)
     route == "setup" -> stringResource(R.string.setup_guide)
+    route == "library/missing" -> stringResource(R.string.missing_info_title)
+    route.startsWith("edit/") -> stringResource(R.string.edit_info)
     route.startsWith("group/") -> entry?.arg("key").orEmpty()
     route.startsWith("folder/") -> entry?.arg("title").orEmpty()
     route.startsWith("stream/genre/") -> entry?.arg("name").orEmpty()
@@ -255,6 +257,8 @@ private fun AppNavHost(nav: androidx.navigation.NavHostController, expanded: Boo
         composable("queue") { QueueContent(Modifier.fillMaxSize()) }
         composable("setup") { SetupGuide(onFinish = { navigator.back() }) }
         composable("album/{id}") { AlbumScreen(it.arg("id")) }
+        composable("edit/album/{id}") { com.lightningds.app.ui.library.EditAlbumScreen(it.arg("id")) }
+        composable("library/missing") { com.lightningds.app.ui.library.MissingInfoScreen() }
         composable("group/{tab}/{key}") { e ->
             GroupScreen(runCatching { LibraryTab.valueOf(e.arg("tab")) }.getOrDefault(LibraryTab.ARTISTS), e.arg("key"))
         }

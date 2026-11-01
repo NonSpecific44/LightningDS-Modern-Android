@@ -164,6 +164,7 @@ fun SettingsScreen() {
             }
         }
         item { SettingRow(stringResource(R.string.refresh_cache), icon = Icons.Default.Refresh, onClick = { c.syncLibrary() }) }
+        item { SettingRow(stringResource(R.string.missing_info_title), stringResource(R.string.missing_info_desc), Icons.Default.Tune, onClick = { nav.navigate(com.lightningds.app.ui.library.EditRoutes.MISSING) }) }
         item {
             SettingRow(
                 stringResource(R.string.clear_cache),

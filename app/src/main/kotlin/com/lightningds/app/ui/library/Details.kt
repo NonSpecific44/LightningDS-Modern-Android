@@ -141,6 +141,8 @@ fun AlbumScreen(albumId: String) {
                     tint = if (starred) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            val nav = LocalNavigator.current
+            IconButton(onClick = { nav.navigate(EditRoutes.album(album.id)) }) { Icon(Icons.Default.Edit, stringResource(R.string.edit_info)) }
             com.lightningds.app.ui.components.OverflowMenu(queueActions({ tracks }))
         },
     ) {

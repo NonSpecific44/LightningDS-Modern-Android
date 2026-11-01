@@ -90,11 +90,13 @@ class AppController(private val context: Context) {
     val collection = CollectionStore(dataDir, ioScope)
     val radioStore = RadioStore(dataDir, ioScope)
     val searchHistory = SearchHistoryStore(dataDir, ioScope)
+    val metadata = com.lightningds.app.data.MetadataStore(dataDir, ioScope)
     private val libraryCache = LibraryCache(File(context.filesDir, "libraries"))
 
     val controlPoint = ControlPoint(networkInterface = ::wifiInterface)
     val http get() = controlPoint.http
     val radio = RadioDirectory(controlPoint.http)
+    val musicBrainz = com.lightningds.core.metadata.MusicBrainz(controlPoint.http)
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -301,8 +303,81 @@ class AppController(private val context: Context) {
 
     // ---- library -----------------------------------------------------------------------------
 
+    /** The library as imported from the server; [library] adds the user's metadata edits. */
     private val _library = MutableStateFlow<LibraryState>(LibraryState.NoServer)
-    val library: StateFlow<LibraryState> = _library.asStateFlow()
+    val library: StateFlow<LibraryState> = combine(_library, metadata.edits) { state, edits ->
+        when (state) {
+            is LibraryState.Ready -> state.copy(library = com.lightningds.core.library.MetadataEditor.apply(state.library, edits[state.library.serverUdn]))
+            else -> state
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, LibraryState.NoServer)
+
+    /** The album as the server describes it, without edits (for the edit screen). */
+    fun originalAlbum(albumId: String): com.lightningds.core.library.Album? =
+        (_library.value as? LibraryState.Ready)?.library?.albums?.firstOrNull { it.id == albumId }
+
+    fun saveAlbumEdits(
+        albumId: String,
+        album: com.lightningds.core.library.AlbumEdit?,
+        tracks: Map<String, com.lightningds.core.library.TrackEdit?>,
+    ) {
+        val udn = (_library.value as? LibraryState.Ready)?.library?.serverUdn ?: return
+        metadata.update(udn, albumId, album, tracks)
+    }
+
+    /** Copies an image the user picked into app storage and returns its file:// URL. */
+    suspend fun importCover(uri: android.net.Uri): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val dir = File(context.filesDir, "covers").apply { mkdirs() }
+        val f = File(dir, "cover_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input -> f.outputStream().use { input.copyTo(it) } }
+            ?: error(context.getString(R.string.operation_failed))
+        f.toURI().toString()
+    }
+
+    data class CoverFillProgress(val done: Int, val total: Int, val found: Int, val finished: Boolean = false)
+
+    private val _coverFill = MutableStateFlow<CoverFillProgress?>(null)
+    val coverFill: StateFlow<CoverFillProgress?> = _coverFill.asStateFlow()
+    private var coverFillJob: Job? = null
+
+    /**
+     * For albums without artwork, looks for a confident MusicBrainz match (same title and artist)
+     * and uses its Cover Art Archive image. Only artwork is filled in automatically.
+     */
+    fun autoFillCovers() {
+        val lib = (library.value as? LibraryState.Ready)?.library ?: return
+        val targets = lib.albums.filter { it.artUri.isNullOrBlank() && it.title.isNotBlank() && !it.title.equals(com.lightningds.core.library.LibraryIndex.UNKNOWN, true) }
+        coverFillJob?.cancel()
+        _coverFill.value = CoverFillProgress(0, targets.size, 0, finished = targets.isEmpty())
+        if (targets.isEmpty()) return
+        coverFillJob = ioScope.launch {
+            var found = 0
+            targets.forEachIndexed { i, album ->
+                try {
+                    val match = musicBrainz.searchReleases(album.title, album.displayArtist.ifBlank { null }, 5).firstOrNull { c ->
+                        c.score >= 90 && c.title.equals(album.title, true) &&
+                            (album.displayArtist.isBlank() || c.artist.contains(album.displayArtist, true) || album.displayArtist.contains(c.artist, true))
+                    }
+                    val cover = match?.let { musicBrainz.findCover(it.id, it.releaseGroupId) }
+                    if (cover != null) {
+                        val cur = metadata.forServer(lib.serverUdn).albums[album.id] ?: com.lightningds.core.library.AlbumEdit()
+                        metadata.update(lib.serverUdn, album.id, cur.copy(artUri = cover), emptyMap())
+                        found++
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+                _coverFill.value = CoverFillProgress(i + 1, targets.size, found)
+            }
+            _coverFill.value = CoverFillProgress(targets.size, targets.size, found, finished = true)
+        }
+    }
+
+    fun cancelCoverFill() {
+        coverFillJob?.cancel()
+        _coverFill.value = null
+    }
     private var syncJob: Job? = null
     private var loadedFor: String? = null
 

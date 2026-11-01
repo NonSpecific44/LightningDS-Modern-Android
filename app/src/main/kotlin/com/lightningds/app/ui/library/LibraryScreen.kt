@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
@@ -159,6 +160,10 @@ private fun ServerBar() {
         }
         IconButton(onClick = { c.settings.setSortDescending(!settings.sortDescending) }) {
             Icon(Icons.AutoMirrored.Filled.Sort, stringResource(if (settings.sortDescending) R.string.sort_za else R.string.sort_az))
+        }
+        val nav = LocalNavigator.current
+        IconButton(onClick = { nav.navigate(EditRoutes.MISSING) }, enabled = server != null) {
+            Icon(Icons.Default.AutoFixHigh, stringResource(R.string.missing_info_title))
         }
         IconButton(onClick = { c.syncLibrary() }, enabled = server != null) { Icon(Icons.Default.Sync, stringResource(R.string.refresh_cache)) }
     }
