@@ -419,4 +419,18 @@
     <string name="cover_fill_note">Only uses covers when the album title and artist match MusicBrainz exactly. About one album per second.</string>
     <string name="cover_fill_progress">Looking up covers: %1$d of %2$d (%3$d found)</string>
     <string name="cover_fill_done">Found covers for %1$d of %2$d albums.</string>
+    <string name="sort_title">Title</string>
+    <string name="sort_artist">Artist</string>
+    <string name="sort_year">Release year</string>
+    <string name="sort_date_added">Date added</string>
+    <string name="sort_date_modified">Date modified</string>
+    <string name="sort_duration">Length</string>
+    <string name="sort_track_count">Number of tracks</string>
+    <string name="sort_newest">Newest first</string>
+    <string name="sort_oldest">Oldest first</string>
+    <string name="sort_longest">Longest first</string>
+    <string name="sort_shortest">Shortest first</string>
+    <string name="sort_most">Most first</string>
+    <string name="sort_fewest">Fewest first</string>
+    <string name="sort_direction">Sort direction</string>
 </resources>

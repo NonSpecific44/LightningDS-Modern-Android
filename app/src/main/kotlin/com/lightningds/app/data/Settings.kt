@@ -25,6 +25,7 @@ data class AppSettings(
     val rendererUdn: String? = null,
     val serverUdn: String? = null,
     val sortDescending: Boolean = false,
+    val librarySort: String = "TITLE",
     val libraryCategory: String = "ALBUMS",
     val keepScreenOn: Boolean = false,
     val onboardingDone: Boolean = false,
@@ -46,6 +47,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val renderer = stringPreferencesKey("renderer_udn")
         val server = stringPreferencesKey("server_udn")
         val sortDesc = booleanPreferencesKey("sort_desc")
+        val sort = stringPreferencesKey("library_sort")
         val category = stringPreferencesKey("library_category")
         val keepOn = booleanPreferencesKey("keep_screen_on")
         val onboarding = booleanPreferencesKey("onboarding_done")
@@ -65,6 +67,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         rendererUdn = this[K.renderer],
         serverUdn = this[K.server],
         sortDescending = this[K.sortDesc] ?: false,
+        librarySort = this[K.sort] ?: "TITLE",
         libraryCategory = this[K.category] ?: "ALBUMS",
         keepScreenOn = this[K.keepOn] ?: false,
         onboardingDone = this[K.onboarding] ?: false,
@@ -101,6 +104,12 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     fun setRenderer(udn: String?) = edit { it.setOrRemove(K.renderer, udn) }
     fun setServer(udn: String?) = edit { it.setOrRemove(K.server, udn) }
     fun setSortDescending(v: Boolean) = edit { it[K.sortDesc] = v }
+
+    /** Picks a sort order with its natural direction (newest/longest first for dates and lengths). */
+    fun setLibrarySort(sort: com.lightningds.core.library.LibrarySort) = edit {
+        it[K.sort] = sort.name
+        it[K.sortDesc] = sort.prefersDescending
+    }
     fun setLibraryCategory(v: String) = edit { it[K.category] = v }
     fun setKeepScreenOn(v: Boolean) = edit { it[K.keepOn] = v }
     fun setOnboardingDone(v: Boolean) = edit { it[K.onboarding] = v }
@@ -120,3 +129,6 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
 
     fun unlockedPasscode(udn: String): String? = current.unlocked.firstOrNull { it.startsWith("$udn=") }?.substringAfter('=')
 }
+
+val AppSettings.sort: com.lightningds.core.library.LibrarySort
+    get() = runCatching { com.lightningds.core.library.LibrarySort.valueOf(librarySort) }.getOrDefault(com.lightningds.core.library.LibrarySort.TITLE)

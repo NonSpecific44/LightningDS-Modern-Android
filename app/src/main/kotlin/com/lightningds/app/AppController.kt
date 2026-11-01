@@ -401,7 +401,9 @@ class AppController(private val context: Context) {
             when {
                 cached != null -> {
                     _library.value = LibraryState.Ready(cached)
-                    if (online) checkForLibraryUpdate(udn)
+                    // Caches from older versions lack fields (e.g. import dates): refresh quietly.
+                    if (online && cached.schema < Library.SCHEMA) syncLibrary()
+                    else if (online) checkForLibraryUpdate(udn)
                 }
                 online -> syncLibrary()
                 else -> _library.value = LibraryState.ServerOffline
@@ -435,7 +437,7 @@ class AppController(private val context: Context) {
         _library.value = if (previous != null) LibraryState.Ready(previous, updating = true) else LibraryState.Syncing(null, null)
         syncJob = ioScope.launch {
             try {
-                val lib = LibrarySync(cd, dev.friendlyName).run { p ->
+                val lib = LibrarySync(cd, dev.friendlyName, previous ?: libraryCache.load(udn)).run { p ->
                     if (previous == null) _library.value = LibraryState.Syncing(p, null)
                 }
                 val scan = serverConfig(udn)?.let { runCatching { it.scanVersion() }.getOrNull() }.orEmpty()
@@ -483,6 +485,9 @@ class AppController(private val context: Context) {
         }
     }
 
+    /** Renderer whose library was last auto-selected (skip it at start if a library is already set). */
+    private var lastRendererForLibrary: String? = settings.current.rendererUdn.takeIf { settings.current.serverUdn != null }
+
     // Must stay last: collectors may run immediately and touch the properties above.
     init {
         // (Re)create the renderer whenever the selected device comes online.
@@ -496,5 +501,29 @@ class AppController(private val context: Context) {
                 udn to (udn != null && udn in keys)
             }.distinctUntilChanged().collect { (udn, online) -> onServerChanged(udn, online) }
         }
+        // Choosing a player also chooses its music library, so the library fills in by itself.
+        scope.launch {
+            var pendingFor: String? = null
+            combine(settings.settings, devices) { s, d -> Triple(s.rendererUdn, s.serverUdn, d) }.collect { (rUdn, sUdn, list) ->
+                if (rUdn != null && rUdn != lastRendererForLibrary) {
+                    lastRendererForLibrary = rUdn
+                    pendingFor = rUdn
+                }
+                if (pendingFor == null || rUdn == null) return@collect
+                val currentOnline = sUdn != null && list.any { it.udn == sUdn && it.isServer }
+                if (currentOnline) { pendingFor = null; return@collect }
+                val pick = libraryFor(rUdn, list) ?: return@collect
+                pendingFor = null
+                if (pick.udn != sUdn) selectServer(pick.udn)
+            }
+        }
+    }
+
+    /** The library that goes with a player: a server on the same box (Lightning first), else the only one. */
+    private fun libraryFor(rendererUdn: String, list: List<DeviceItem>): DeviceItem? {
+        val renderer = list.firstOrNull { it.udn == rendererUdn } ?: return null
+        val servers = list.filter { it.isServer }
+        return servers.filter { it.host != null && it.host == renderer.host }.maxByOrNull { if (it.isLightning) 1 else 0 }
+            ?: servers.singleOrNull()
     }
 }

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -57,6 +58,9 @@ import com.lightningds.app.DeviceItem
 import com.lightningds.app.R
 import com.lightningds.app.data.TextAlign
 import com.lightningds.app.data.ThemeMode
+import com.lightningds.app.data.sort
+import com.lightningds.app.ui.library.directionLabel
+import com.lightningds.app.ui.library.label
 import com.lightningds.app.ui.components.ConfirmDialog
 import com.lightningds.app.ui.components.LocalController
 import com.lightningds.app.ui.components.LocalNavigator
@@ -132,8 +136,8 @@ fun SettingsScreen() {
         )
         "sort" -> ChoiceDialog(
             stringResource(R.string.sorting),
-            listOf(false to stringResource(R.string.sort_az), true to stringResource(R.string.sort_za)),
-            settings.sortDescending, { dialog = null }, { c.settings.setSortDescending(it) },
+            com.lightningds.core.library.LibrarySort.entries.map { it to it.label() },
+            settings.sort, { dialog = null }, { c.settings.setLibrarySort(it) },
         )
         "align" -> ChoiceDialog(
             stringResource(R.string.text_alignment),
@@ -172,7 +176,11 @@ fun SettingsScreen() {
                 Icons.Default.Delete, onClick = { dialog = "clear" },
             )
         }
-        item { SettingRow(stringResource(R.string.sorting), stringResource(if (settings.sortDescending) R.string.sort_za else R.string.sort_az), Icons.AutoMirrored.Filled.Sort, onClick = { dialog = "sort" }) }
+        item { SettingRow(stringResource(R.string.sorting), settings.sort.label() + " · " + directionLabel(settings.sort, settings.sortDescending), Icons.AutoMirrored.Filled.Sort, onClick = { dialog = "sort" }) }
+        item {
+            SettingRow(stringResource(R.string.sort_direction), directionLabel(settings.sort, settings.sortDescending), Icons.Default.SwapVert,
+                onClick = { c.settings.setSortDescending(!settings.sortDescending) })
+        }
         item { SettingRow(stringResource(R.string.text_alignment), stringResource(if (settings.textAlign == TextAlign.CENTER) R.string.align_center else R.string.align_start), Icons.Default.FormatAlignCenter, onClick = { dialog = "align" }) }
 
         item { SectionHeader(stringResource(R.string.settings_streaming)) }
