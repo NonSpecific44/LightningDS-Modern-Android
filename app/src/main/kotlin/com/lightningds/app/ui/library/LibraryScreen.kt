@@ -123,13 +123,16 @@ fun LibraryScreen() {
             }
         }
         Box(Modifier.weight(1f)) {
-            when (tab) {
-                LibraryTab.COLLECTION -> CollectionView()
-                LibraryTab.PLAYLISTS -> PlaylistsView()
-                LibraryTab.FOLDERS -> if (c.contentDirectory() != null) FolderBrowser("0", null) else NoLibrary(state)
-                else -> when (val s = state) {
-                    is LibraryState.Ready -> LibraryContent(s.library, tab, settings.sort, settings.sortDescending, settings.textAlign == AlignPref.CENTER, s.updating)
-                    else -> NoLibrary(s)
+            // A new category or sort order starts at the top: fresh list state per combination.
+            androidx.compose.runtime.key(tab, settings.sort, settings.sortDescending) {
+                when (tab) {
+                    LibraryTab.COLLECTION -> CollectionView()
+                    LibraryTab.PLAYLISTS -> PlaylistsView()
+                    LibraryTab.FOLDERS -> if (c.contentDirectory() != null) FolderBrowser("0", null) else NoLibrary(state)
+                    else -> when (val s = state) {
+                        is LibraryState.Ready -> LibraryContent(s.library, tab, settings.sort, settings.sortDescending, settings.textAlign == AlignPref.CENTER, s.updating)
+                        else -> NoLibrary(s)
+                    }
                 }
             }
         }

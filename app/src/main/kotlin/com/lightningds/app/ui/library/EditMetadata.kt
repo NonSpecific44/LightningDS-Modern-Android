@@ -124,7 +124,7 @@ fun EditAlbumScreen(albumId: String) {
         }
     }
 
-    fun save() {
+    fun save(thenWriteFiles: Boolean = false) {
         val albumEdit = AlbumEdit(
             title = diff(title, original.title),
             artist = diff(artist, original.artist),
@@ -146,6 +146,7 @@ fun EditAlbumScreen(albumId: String) {
         // An edit with only the MusicBrainz id and no changes is dropped.
         c.saveAlbumEdits(albumId, albumEdit.takeIf { it.copy(musicBrainzId = null) != AlbumEdit() }, trackEdits)
         nav.back()
+        if (thenWriteFiles) nav.navigate(FileRoutes.write(albumId))
     }
 
     if (searching) {
@@ -224,6 +225,7 @@ fun EditAlbumScreen(albumId: String) {
                 Text(stringResource(R.string.metadata_stored_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { save() }) { Text(stringResource(R.string.save)) }
+                    FilledTonalButton(onClick = { save(thenWriteFiles = true) }) { Text(stringResource(R.string.save_and_write_files)) }
                     OutlinedButton(onClick = { nav.back() }) { Text(stringResource(R.string.cancel)) }
                     TextButton(onClick = { confirmReset = true }) {
                         Icon(Icons.AutoMirrored.Filled.Undo, null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.metadata_reset))

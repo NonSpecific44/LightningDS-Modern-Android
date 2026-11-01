@@ -64,3 +64,16 @@ class SortTest {
         assertEquals("2016-03-01 00:00:00", t.modifyDate)
     }
 }
+
+class VersionsTest {
+    @org.junit.Test
+    fun compares() {
+        val v = com.lightningds.core.update.Versions
+        org.junit.Assert.assertTrue(v.isNewer("v2.1.2", "2.1.1"))
+        org.junit.Assert.assertTrue(v.isNewer("v2.1.10", "2.1.9"))
+        org.junit.Assert.assertTrue(v.isNewer("v3.0", "2.9.9"))
+        org.junit.Assert.assertFalse(v.isNewer("v2.1.1", "2.1.1"))
+        org.junit.Assert.assertFalse(v.isNewer("v2.1.0", "2.1.1"))
+        org.junit.Assert.assertFalse(v.isNewer("2.1.1-beta", "2.1.1"))
+    }
+}

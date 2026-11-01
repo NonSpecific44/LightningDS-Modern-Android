@@ -91,12 +91,14 @@ class AppController(private val context: Context) {
     val radioStore = RadioStore(dataDir, ioScope)
     val searchHistory = SearchHistoryStore(dataDir, ioScope)
     val metadata = com.lightningds.app.data.MetadataStore(dataDir, ioScope)
+    val albumFolders = com.lightningds.app.data.AlbumFolderStore(dataDir, ioScope)
     private val libraryCache = LibraryCache(File(context.filesDir, "libraries"))
 
     val controlPoint = ControlPoint(networkInterface = ::wifiInterface)
     val http get() = controlPoint.http
     val radio = RadioDirectory(controlPoint.http)
     val musicBrainz = com.lightningds.core.metadata.MusicBrainz(controlPoint.http)
+    val updater = Updater(context, controlPoint.http)
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -162,6 +164,11 @@ class AppController(private val context: Context) {
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         multicastLock = wifi.createMulticastLock("LightningDS").apply { setReferenceCounted(false); acquire() }
         ioScope.launch { runCatching { controlPoint.start() }.onFailure { toast(it.message ?: "Discovery failed") } }
+        val s = settings.current
+        if (s.autoUpdateCheck && System.currentTimeMillis() - s.lastUpdateCheck > Updater.CHECK_INTERVAL_MS) {
+            settings.setLastUpdateCheck(System.currentTimeMillis())
+            ioScope.launch { updater.check(quiet = true) }
+        }
     }
 
     fun onBackground() {
@@ -332,6 +339,73 @@ class AppController(private val context: Context) {
         context.contentResolver.openInputStream(uri)?.use { input -> f.outputStream().use { input.copyTo(it) } }
             ?: error(context.getString(R.string.operation_failed))
         f.toURI().toString()
+    }
+
+    // ---- writing tags to the music files over SMB ------------------------------------------------
+
+    /** Host for SMB: the configured one, else the music library server's address. */
+    fun smbHost(): String = settings.current.smbHost.ifBlank { selectedServer.value?.host.orEmpty() }
+
+    fun smbConfigured(): Boolean = smbHost().isNotBlank() && settings.current.smbShare.isNotBlank()
+
+    fun smbStore(): com.lightningds.core.files.SmbFileStore? {
+        val s = settings.current
+        if (!smbConfigured()) return null
+        return com.lightningds.core.files.SmbFileStore(smbHost(), s.smbShare, s.smbUser, s.smbPassword, s.smbDomain)
+    }
+
+    /** The album's folder on the share: remembered from last time, else searched for. */
+    suspend fun findAlbumFolder(store: com.lightningds.core.files.FileStore, albumId: String): String? {
+        val lib = (_library.value as? LibraryState.Ready)?.library ?: return null
+        val album = originalAlbum(albumId) ?: return null
+        albumFolders.get(lib.serverUdn, albumId)?.let { path ->
+            if (runCatching { store.list(path) }.isSuccess) return path
+        }
+        return com.lightningds.core.files.FileMatcher.findFolder(store, album, settings.current.smbRoot)
+            ?.also { albumFolders.set(lib.serverUdn, albumId, it) }
+    }
+
+    fun rememberAlbumFolder(albumId: String, path: String) {
+        val udn = (_library.value as? LibraryState.Ready)?.library?.serverUdn ?: return
+        albumFolders.set(udn, albumId, path)
+    }
+
+    /** The album's edited cover as bytes, if the user changed it. */
+    suspend fun editedCover(albumId: String): com.lightningds.core.files.Cover? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val udn = (_library.value as? LibraryState.Ready)?.library?.serverUdn ?: return@withContext null
+        val url = metadata.forServer(udn).albums[albumId]?.artUri ?: return@withContext null
+        when {
+            url.startsWith("file:") -> File(java.net.URI(url)).takeIf { it.exists() }?.let {
+                com.lightningds.core.files.Cover(it.readBytes(), if (it.name.endsWith(".png", true)) "image/png" else "image/jpeg")
+            }
+            url.startsWith("http") -> http.newCall(okhttp3.Request.Builder().url(url).header("User-Agent", com.lightningds.core.metadata.MusicBrainz.USER_AGENT).build()).execute().use { r ->
+                if (!r.isSuccessful) error("Cover download failed (HTTP ${r.code})")
+                val type = r.header("Content-Type")?.substringBefore(';')?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
+                com.lightningds.core.files.Cover(r.body!!.bytes(), type)
+            }
+            else -> null
+        }
+    }
+
+    /** Writes the album's edits into its files, then asks Lightning Server to rescan. */
+    suspend fun writeAlbumTags(
+        store: com.lightningds.core.files.FileStore,
+        albumId: String,
+        folder: String,
+        matches: List<com.lightningds.core.files.FileMatcher.Match>,
+        embedCover: Boolean,
+        folderCover: Boolean,
+        progress: (Int, Int, String) -> Unit,
+    ): List<com.lightningds.core.files.WriteResult> {
+        val lib = (_library.value as? LibraryState.Ready)?.library ?: error(context.getString(R.string.server_offline))
+        val cover = if (embedCover || folderCover) editedCover(albumId) else null
+        val results = com.lightningds.core.files.TagSync(store, File(context.cacheDir, "tagedit"))
+            .write(folder, matches, albumId, metadata.forServer(lib.serverUdn), cover.takeIf { embedCover }, cover.takeIf { folderCover }, progress)
+        rememberAlbumFolder(albumId, folder)
+        if (results.any { it.ok }) {
+            serverConfig(lib.serverUdn)?.let { cfg -> runCatching { cfg.rescan() } }
+        }
+        return results
     }
 
     data class CoverFillProgress(val done: Int, val total: Int, val found: Int, val finished: Boolean = false)

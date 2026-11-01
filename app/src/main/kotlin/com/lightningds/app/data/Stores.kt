@@ -179,3 +179,16 @@ class MetadataStore(dir: File, scope: CoroutineScope) {
         all + (udn to com.lightningds.core.library.LibraryEdits(albums, trackMap))
     }
 }
+
+/** Remembers which folder on the SMB share holds each album ("serverUdn|albumId" → path). */
+class AlbumFolderStore(dir: File, scope: CoroutineScope) {
+    private val store = JsonFileStore(
+        File(dir, "album_folders.json"),
+        kotlinx.serialization.builtins.MapSerializer(String.serializer(), String.serializer()),
+        emptyMap(),
+        scope,
+    )
+
+    fun get(udn: String, albumId: String): String? = store.value.value["$udn|$albumId"]
+    fun set(udn: String, albumId: String, path: String) = store.update { it + ("$udn|$albumId" to path) }
+}

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -146,6 +147,7 @@ fun SettingsScreen() {
         )
         "clear" -> ConfirmDialog(stringResource(R.string.clear_cache), stringResource(R.string.clear_cache_confirm), { dialog = null }, { c.clearLibraryCache() })
         "streaming" -> StreamingCredentialsDialog { dialog = null }
+        "smb" -> com.lightningds.app.ui.library.SmbSettingsDialog(onDismiss = { dialog = null })
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
@@ -169,6 +171,7 @@ fun SettingsScreen() {
         }
         item { SettingRow(stringResource(R.string.refresh_cache), icon = Icons.Default.Refresh, onClick = { c.syncLibrary() }) }
         item { SettingRow(stringResource(R.string.missing_info_title), stringResource(R.string.missing_info_desc), Icons.Default.Tune, onClick = { nav.navigate(com.lightningds.app.ui.library.EditRoutes.MISSING) }) }
+        item { SettingRow(stringResource(R.string.smb_title), settings.smbShare.takeIf { it.isNotBlank() }?.let { "\\\\" + c.smbHost() + "\\" + it } ?: stringResource(R.string.smb_desc_short), Icons.Default.Dns, onClick = { dialog = "smb" }) }
         item {
             SettingRow(
                 stringResource(R.string.clear_cache),
@@ -220,6 +223,11 @@ fun SettingsScreen() {
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(FEEDBACK_URL))) }
             })
         }
+        item {
+            SettingRow(stringResource(R.string.update_check), stringResource(R.string.update_current, c.updater.currentVersion), Icons.Default.SystemUpdate,
+                onClick = { c.launchIo { c.updater.check(quiet = false) } })
+        }
+        item { SwitchRow(stringResource(R.string.update_auto), stringResource(R.string.update_auto_desc), settings.autoUpdateCheck, Icons.Default.Sync) { c.settings.setAutoUpdateCheck(it) } }
         item { SettingRow(stringResource(R.string.app_name), stringResource(R.string.version, BuildConfigCompat.versionName(context)) + "\n" + stringResource(R.string.about_text), Icons.Default.Info) }
     }
 }
