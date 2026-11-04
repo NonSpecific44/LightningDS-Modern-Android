@@ -28,6 +28,8 @@ class FakeDeviceTest {
     private val calls = Collections.synchronizedList(mutableListOf<String>())
     private val callbacks = Collections.synchronizedList(mutableListOf<String>())
     private var nextId = 100
+    @Volatile private var serverTransport = "Stopped"
+    @Volatile private var serverId = 0
 
     private val playlistNs = "urn:av-openhome-org:service:Playlist:1"
     private val productNs = "urn:av-openhome-org:service:Product:1"
@@ -77,6 +79,8 @@ class FakeDeviceTest {
         calls += "$action:" + body.substringAfter("<u:$action").substringAfter('>').substringBefore("</u:$action>")
         val xml = when (action) {
             "Insert" -> Fixtures.soapResponse(action, playlistNs, "NewId" to (nextId++).toString())
+            "TransportState" -> Fixtures.soapResponse(action, playlistNs, "Value" to serverTransport)
+            "Id" -> Fixtures.soapResponse(action, playlistNs, "Value" to serverId.toString())
             "GetHardWareInfo" -> Fixtures.soapResponse(action, hwNs, "Info" to Xml.escape("<MFG>AURALiC</MFG><TYPE>ARIES</TYPE><SN>123</SN><FW>4.0</FW>"))
             "Browse" -> {
                 val id = body.substringAfter("<ObjectID>").substringBefore("</ObjectID>")
@@ -171,6 +175,28 @@ class FakeDeviceTest {
             s.getOutputStream().write(req.toByteArray())
             s.getOutputStream().flush()
             s.getInputStream().read()
+        }
+    }
+
+    @Test
+    fun pollingCatchesUpWithoutEvents() = runBlocking {
+        val cp = ControlPoint()
+        try {
+            cp.fetch(server.url("/desc.xml").toString())
+            val aries = cp.devices.value["uuid:aries-1"]!!
+            // Events never arrive here (nothing sends NOTIFY), so only polling can update the state.
+            val renderer = OpenHomeRenderer(aries, cp.events, cp.scope, pollIntervalMs = 200)
+            renderer.start()
+            serverTransport = "Playing"
+            serverId = 42
+            val deadline = System.currentTimeMillis() + 10_000
+            while (System.currentTimeMillis() < deadline &&
+                (renderer.state.value.transport.name != "PLAYING" || renderer.state.value.currentId != 42)) delay(50)
+            assertEquals("PLAYING", renderer.state.value.transport.name)
+            assertEquals(42, renderer.state.value.currentId)
+            renderer.close()
+        } finally {
+            cp.stop()
         }
     }
 }

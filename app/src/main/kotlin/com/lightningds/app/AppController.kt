@@ -90,11 +90,15 @@ class AppController(private val context: Context) {
     val collection = CollectionStore(dataDir, ioScope)
     val radioStore = RadioStore(dataDir, ioScope)
     val searchHistory = SearchHistoryStore(dataDir, ioScope)
+    val metadata = com.lightningds.app.data.MetadataStore(dataDir, ioScope)
+    val albumFolders = com.lightningds.app.data.AlbumFolderStore(dataDir, ioScope)
     private val libraryCache = LibraryCache(File(context.filesDir, "libraries"))
 
     val controlPoint = ControlPoint(networkInterface = ::wifiInterface)
     val http get() = controlPoint.http
     val radio = RadioDirectory(controlPoint.http)
+    val musicBrainz = com.lightningds.core.metadata.MusicBrainz(controlPoint.http)
+    val updater = Updater(context, controlPoint.http)
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -160,6 +164,11 @@ class AppController(private val context: Context) {
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         multicastLock = wifi.createMulticastLock("LightningDS").apply { setReferenceCounted(false); acquire() }
         ioScope.launch { runCatching { controlPoint.start() }.onFailure { toast(it.message ?: "Discovery failed") } }
+        val s = settings.current
+        if (s.autoUpdateCheck && System.currentTimeMillis() - s.lastUpdateCheck > Updater.CHECK_INTERVAL_MS) {
+            settings.setLastUpdateCheck(System.currentTimeMillis())
+            ioScope.launch { updater.check(quiet = true) }
+        }
     }
 
     fun onBackground() {
@@ -221,7 +230,8 @@ class AppController(private val context: Context) {
         }
         current?.close()
         if (!dev.isRenderer) { _renderer.value = null; return }
-        val r: Renderer = if (dev.isOpenHomeRenderer) OpenHomeRenderer(dev, controlPoint.events, ioScope)
+        // Poll only while the app is on screen; events keep things roughly current otherwise.
+        val r: Renderer = if (dev.isOpenHomeRenderer) OpenHomeRenderer(dev, controlPoint.events, ioScope, pollWhile = { started })
         else UpnpAvRenderer(dev, controlPoint.events, ioScope)
         r.start()
         _renderer.value = r
@@ -301,8 +311,148 @@ class AppController(private val context: Context) {
 
     // ---- library -----------------------------------------------------------------------------
 
+    /** The library as imported from the server; [library] adds the user's metadata edits. */
     private val _library = MutableStateFlow<LibraryState>(LibraryState.NoServer)
-    val library: StateFlow<LibraryState> = _library.asStateFlow()
+    val library: StateFlow<LibraryState> = combine(_library, metadata.edits) { state, edits ->
+        when (state) {
+            is LibraryState.Ready -> state.copy(library = com.lightningds.core.library.MetadataEditor.apply(state.library, edits[state.library.serverUdn]))
+            else -> state
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, LibraryState.NoServer)
+
+    /** The album as the server describes it, without edits (for the edit screen). */
+    fun originalAlbum(albumId: String): com.lightningds.core.library.Album? =
+        (_library.value as? LibraryState.Ready)?.library?.albums?.firstOrNull { it.id == albumId }
+
+    fun saveAlbumEdits(
+        albumId: String,
+        album: com.lightningds.core.library.AlbumEdit?,
+        tracks: Map<String, com.lightningds.core.library.TrackEdit?>,
+    ) {
+        val udn = (_library.value as? LibraryState.Ready)?.library?.serverUdn ?: return
+        metadata.update(udn, albumId, album, tracks)
+    }
+
+    /** Copies an image the user picked into app storage and returns its file:// URL. */
+    suspend fun importCover(uri: android.net.Uri): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val dir = File(context.filesDir, "covers").apply { mkdirs() }
+        val f = File(dir, "cover_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input -> f.outputStream().use { input.copyTo(it) } }
+            ?: error(context.getString(R.string.operation_failed))
+        f.toURI().toString()
+    }
+
+    // ---- writing tags to the music files over SMB ------------------------------------------------
+
+    /** Host for SMB: the configured one, else the music library server's address. */
+    fun smbHost(): String = settings.current.smbHost.ifBlank { selectedServer.value?.host.orEmpty() }
+
+    fun smbConfigured(): Boolean = smbHost().isNotBlank() && settings.current.smbShare.isNotBlank()
+
+    fun smbStore(): com.lightningds.core.files.SmbFileStore? {
+        val s = settings.current
+        if (!smbConfigured()) return null
+        return com.lightningds.core.files.SmbFileStore(smbHost(), s.smbShare, s.smbUser, s.smbPassword, s.smbDomain)
+    }
+
+    /** The album's folder on the share: remembered from last time, else searched for. */
+    suspend fun findAlbumFolder(store: com.lightningds.core.files.FileStore, albumId: String): String? {
+        val lib = (_library.value as? LibraryState.Ready)?.library ?: return null
+        val album = originalAlbum(albumId) ?: return null
+        albumFolders.get(lib.serverUdn, albumId)?.let { path ->
+            if (runCatching { store.list(path) }.isSuccess) return path
+        }
+        return com.lightningds.core.files.FileMatcher.findFolder(store, album, settings.current.smbRoot)
+            ?.also { albumFolders.set(lib.serverUdn, albumId, it) }
+    }
+
+    fun rememberAlbumFolder(albumId: String, path: String) {
+        val udn = (_library.value as? LibraryState.Ready)?.library?.serverUdn ?: return
+        albumFolders.set(udn, albumId, path)
+    }
+
+    /** The album's edited cover as bytes, if the user changed it. */
+    suspend fun editedCover(albumId: String): com.lightningds.core.files.Cover? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val udn = (_library.value as? LibraryState.Ready)?.library?.serverUdn ?: return@withContext null
+        val url = metadata.forServer(udn).albums[albumId]?.artUri ?: return@withContext null
+        when {
+            url.startsWith("file:") -> File(java.net.URI(url)).takeIf { it.exists() }?.let {
+                com.lightningds.core.files.Cover(it.readBytes(), if (it.name.endsWith(".png", true)) "image/png" else "image/jpeg")
+            }
+            url.startsWith("http") -> http.newCall(okhttp3.Request.Builder().url(url).header("User-Agent", com.lightningds.core.metadata.MusicBrainz.USER_AGENT).build()).execute().use { r ->
+                if (!r.isSuccessful) error("Cover download failed (HTTP ${r.code})")
+                val type = r.header("Content-Type")?.substringBefore(';')?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
+                com.lightningds.core.files.Cover(r.body!!.bytes(), type)
+            }
+            else -> null
+        }
+    }
+
+    /** Writes the album's edits into its files, then asks Lightning Server to rescan. */
+    suspend fun writeAlbumTags(
+        store: com.lightningds.core.files.FileStore,
+        albumId: String,
+        folder: String,
+        matches: List<com.lightningds.core.files.FileMatcher.Match>,
+        embedCover: Boolean,
+        folderCover: Boolean,
+        progress: (Int, Int, String) -> Unit,
+    ): List<com.lightningds.core.files.WriteResult> {
+        val lib = (_library.value as? LibraryState.Ready)?.library ?: error(context.getString(R.string.server_offline))
+        val cover = if (embedCover || folderCover) editedCover(albumId) else null
+        val results = com.lightningds.core.files.TagSync(store, File(context.cacheDir, "tagedit"))
+            .write(folder, matches, albumId, metadata.forServer(lib.serverUdn), cover.takeIf { embedCover }, cover.takeIf { folderCover }, progress)
+        rememberAlbumFolder(albumId, folder)
+        if (results.any { it.ok }) {
+            serverConfig(lib.serverUdn)?.let { cfg -> runCatching { cfg.rescan() } }
+        }
+        return results
+    }
+
+    data class CoverFillProgress(val done: Int, val total: Int, val found: Int, val finished: Boolean = false)
+
+    private val _coverFill = MutableStateFlow<CoverFillProgress?>(null)
+    val coverFill: StateFlow<CoverFillProgress?> = _coverFill.asStateFlow()
+    private var coverFillJob: Job? = null
+
+    /**
+     * For albums without artwork, looks for a confident MusicBrainz match (same title and artist)
+     * and uses its Cover Art Archive image. Only artwork is filled in automatically.
+     */
+    fun autoFillCovers() {
+        val lib = (library.value as? LibraryState.Ready)?.library ?: return
+        val targets = lib.albums.filter { it.artUri.isNullOrBlank() && it.title.isNotBlank() && !it.title.equals(com.lightningds.core.library.LibraryIndex.UNKNOWN, true) }
+        coverFillJob?.cancel()
+        _coverFill.value = CoverFillProgress(0, targets.size, 0, finished = targets.isEmpty())
+        if (targets.isEmpty()) return
+        coverFillJob = ioScope.launch {
+            var found = 0
+            targets.forEachIndexed { i, album ->
+                try {
+                    val match = musicBrainz.searchReleases(album.title, album.displayArtist.ifBlank { null }, 5).firstOrNull { c ->
+                        c.score >= 90 && c.title.equals(album.title, true) &&
+                            (album.displayArtist.isBlank() || c.artist.contains(album.displayArtist, true) || album.displayArtist.contains(c.artist, true))
+                    }
+                    val cover = match?.let { musicBrainz.findCover(it.id, it.releaseGroupId) }
+                    if (cover != null) {
+                        val cur = metadata.forServer(lib.serverUdn).albums[album.id] ?: com.lightningds.core.library.AlbumEdit()
+                        metadata.update(lib.serverUdn, album.id, cur.copy(artUri = cover), emptyMap())
+                        found++
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+                _coverFill.value = CoverFillProgress(i + 1, targets.size, found)
+            }
+            _coverFill.value = CoverFillProgress(targets.size, targets.size, found, finished = true)
+        }
+    }
+
+    fun cancelCoverFill() {
+        coverFillJob?.cancel()
+        _coverFill.value = null
+    }
     private var syncJob: Job? = null
     private var loadedFor: String? = null
 
@@ -326,7 +476,9 @@ class AppController(private val context: Context) {
             when {
                 cached != null -> {
                     _library.value = LibraryState.Ready(cached)
-                    if (online) checkForLibraryUpdate(udn)
+                    // Caches from older versions lack fields (e.g. import dates): refresh quietly.
+                    if (online && cached.schema < Library.SCHEMA) syncLibrary()
+                    else if (online) checkForLibraryUpdate(udn)
                 }
                 online -> syncLibrary()
                 else -> _library.value = LibraryState.ServerOffline
@@ -360,7 +512,7 @@ class AppController(private val context: Context) {
         _library.value = if (previous != null) LibraryState.Ready(previous, updating = true) else LibraryState.Syncing(null, null)
         syncJob = ioScope.launch {
             try {
-                val lib = LibrarySync(cd, dev.friendlyName).run { p ->
+                val lib = LibrarySync(cd, dev.friendlyName, previous ?: libraryCache.load(udn)).run { p ->
                     if (previous == null) _library.value = LibraryState.Syncing(p, null)
                 }
                 val scan = serverConfig(udn)?.let { runCatching { it.scanVersion() }.getOrNull() }.orEmpty()
@@ -408,6 +560,9 @@ class AppController(private val context: Context) {
         }
     }
 
+    /** Renderer whose library was last auto-selected (skip it at start if a library is already set). */
+    private var lastRendererForLibrary: String? = settings.current.rendererUdn.takeIf { settings.current.serverUdn != null }
+
     // Must stay last: collectors may run immediately and touch the properties above.
     init {
         // (Re)create the renderer whenever the selected device comes online.
@@ -421,5 +576,29 @@ class AppController(private val context: Context) {
                 udn to (udn != null && udn in keys)
             }.distinctUntilChanged().collect { (udn, online) -> onServerChanged(udn, online) }
         }
+        // Choosing a player also chooses its music library, so the library fills in by itself.
+        scope.launch {
+            var pendingFor: String? = null
+            combine(settings.settings, devices) { s, d -> Triple(s.rendererUdn, s.serverUdn, d) }.collect { (rUdn, sUdn, list) ->
+                if (rUdn != null && rUdn != lastRendererForLibrary) {
+                    lastRendererForLibrary = rUdn
+                    pendingFor = rUdn
+                }
+                if (pendingFor == null || rUdn == null) return@collect
+                val currentOnline = sUdn != null && list.any { it.udn == sUdn && it.isServer }
+                if (currentOnline) { pendingFor = null; return@collect }
+                val pick = libraryFor(rUdn, list) ?: return@collect
+                pendingFor = null
+                if (pick.udn != sUdn) selectServer(pick.udn)
+            }
+        }
+    }
+
+    /** The library that goes with a player: a server on the same box (Lightning first), else the only one. */
+    private fun libraryFor(rendererUdn: String, list: List<DeviceItem>): DeviceItem? {
+        val renderer = list.firstOrNull { it.udn == rendererUdn } ?: return null
+        val servers = list.filter { it.isServer }
+        return servers.filter { it.host != null && it.host == renderer.host }.maxByOrNull { if (it.isLightning) 1 else 0 }
+            ?: servers.singleOrNull()
     }
 }

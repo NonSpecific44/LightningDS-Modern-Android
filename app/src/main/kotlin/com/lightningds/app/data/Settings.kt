@@ -25,6 +25,17 @@ data class AppSettings(
     val rendererUdn: String? = null,
     val serverUdn: String? = null,
     val sortDescending: Boolean = false,
+    val librarySort: String = "TITLE",
+    /** SMB access to the music files, for writing tags. Empty host = the library server's address. */
+    val smbHost: String = "",
+    val smbShare: String = "",
+    val smbUser: String = "",
+    val smbPassword: String = "",
+    val smbDomain: String = "",
+    /** Folder on the share that holds the music (optional, speeds up finding albums). */
+    val smbRoot: String = "",
+    val autoUpdateCheck: Boolean = true,
+    val lastUpdateCheck: Long = 0,
     val libraryCategory: String = "ALBUMS",
     val keepScreenOn: Boolean = false,
     val onboardingDone: Boolean = false,
@@ -46,6 +57,15 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val renderer = stringPreferencesKey("renderer_udn")
         val server = stringPreferencesKey("server_udn")
         val sortDesc = booleanPreferencesKey("sort_desc")
+        val sort = stringPreferencesKey("library_sort")
+        val smbHost = stringPreferencesKey("smb_host")
+        val smbShare = stringPreferencesKey("smb_share")
+        val smbUser = stringPreferencesKey("smb_user")
+        val smbPassword = stringPreferencesKey("smb_password")
+        val smbDomain = stringPreferencesKey("smb_domain")
+        val smbRoot = stringPreferencesKey("smb_root")
+        val autoUpdate = booleanPreferencesKey("auto_update_check")
+        val lastUpdate = androidx.datastore.preferences.core.longPreferencesKey("last_update_check")
         val category = stringPreferencesKey("library_category")
         val keepOn = booleanPreferencesKey("keep_screen_on")
         val onboarding = booleanPreferencesKey("onboarding_done")
@@ -65,6 +85,15 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         rendererUdn = this[K.renderer],
         serverUdn = this[K.server],
         sortDescending = this[K.sortDesc] ?: false,
+        librarySort = this[K.sort] ?: "TITLE",
+        smbHost = this[K.smbHost].orEmpty(),
+        smbShare = this[K.smbShare].orEmpty(),
+        smbUser = this[K.smbUser].orEmpty(),
+        smbPassword = this[K.smbPassword].orEmpty(),
+        smbDomain = this[K.smbDomain].orEmpty(),
+        smbRoot = this[K.smbRoot].orEmpty(),
+        autoUpdateCheck = this[K.autoUpdate] ?: true,
+        lastUpdateCheck = this[K.lastUpdate] ?: 0L,
         libraryCategory = this[K.category] ?: "ALBUMS",
         keepScreenOn = this[K.keepOn] ?: false,
         onboardingDone = this[K.onboarding] ?: false,
@@ -101,6 +130,24 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     fun setRenderer(udn: String?) = edit { it.setOrRemove(K.renderer, udn) }
     fun setServer(udn: String?) = edit { it.setOrRemove(K.server, udn) }
     fun setSortDescending(v: Boolean) = edit { it[K.sortDesc] = v }
+
+    fun setSmb(host: String, share: String, user: String, password: String, domain: String, root: String) = edit {
+        it[K.smbHost] = host.trim()
+        it[K.smbShare] = share.trim().trim('/', '\\')
+        it[K.smbUser] = user.trim()
+        it[K.smbPassword] = password
+        it[K.smbDomain] = domain.trim()
+        it[K.smbRoot] = root.trim().trim('/', '\\')
+    }
+
+    fun setAutoUpdateCheck(v: Boolean) = edit { it[K.autoUpdate] = v }
+    fun setLastUpdateCheck(v: Long) = edit { it[K.lastUpdate] = v }
+
+    /** Picks a sort order with its natural direction (newest/longest first for dates and lengths). */
+    fun setLibrarySort(sort: com.lightningds.core.library.LibrarySort) = edit {
+        it[K.sort] = sort.name
+        it[K.sortDesc] = sort.prefersDescending
+    }
     fun setLibraryCategory(v: String) = edit { it[K.category] = v }
     fun setKeepScreenOn(v: Boolean) = edit { it[K.keepOn] = v }
     fun setOnboardingDone(v: Boolean) = edit { it[K.onboarding] = v }
@@ -120,3 +167,6 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
 
     fun unlockedPasscode(udn: String): String? = current.unlocked.firstOrNull { it.startsWith("$udn=") }?.substringAfter('=')
 }
+
+val AppSettings.sort: com.lightningds.core.library.LibrarySort
+    get() = runCatching { com.lightningds.core.library.LibrarySort.valueOf(librarySort) }.getOrDefault(com.lightningds.core.library.LibrarySort.TITLE)

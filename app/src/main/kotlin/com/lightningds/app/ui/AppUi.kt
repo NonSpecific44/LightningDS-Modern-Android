@@ -152,9 +152,16 @@ fun LightningAppUi() {
     val currentTop = topLevel ?: lastTop
 
     PasscodeDialogHost()
+    UpdateDialogHost()
     if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false }, onSettings = { showDevices = false; navigator.navigate("settings") })
 
-    androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator) {
+    val rendererState by c.rendererState.collectAsStateCompat()
+    val nowPlaying = rendererState?.let { st ->
+        val src = st.currentSource
+        if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) null
+        else com.lightningds.app.ui.components.NowPlayingKey(st.trackUri ?: st.track?.uri, st.track?.id, st.track?.title, st.isPlaying)
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator, com.lightningds.app.ui.components.LocalNowPlaying provides nowPlaying) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val expanded = maxWidth >= 1000.dp
             NavigationSuiteScaffold(
@@ -228,6 +235,9 @@ private fun titleFor(route: String?, entry: NavBackStackEntry?): String = when {
     route == "player" -> stringResource(R.string.now_playing)
     route == "queue" -> stringResource(R.string.queue)
     route == "setup" -> stringResource(R.string.setup_guide)
+    route == "library/missing" -> stringResource(R.string.missing_info_title)
+    route.startsWith("edit/files") -> stringResource(R.string.write_files_title)
+    route.startsWith("edit/") -> stringResource(R.string.edit_info)
     route.startsWith("group/") -> entry?.arg("key").orEmpty()
     route.startsWith("folder/") -> entry?.arg("title").orEmpty()
     route.startsWith("stream/genre/") -> entry?.arg("name").orEmpty()
@@ -255,6 +265,9 @@ private fun AppNavHost(nav: androidx.navigation.NavHostController, expanded: Boo
         composable("queue") { QueueContent(Modifier.fillMaxSize()) }
         composable("setup") { SetupGuide(onFinish = { navigator.back() }) }
         composable("album/{id}") { AlbumScreen(it.arg("id")) }
+        composable("edit/album/{id}") { com.lightningds.app.ui.library.EditAlbumScreen(it.arg("id")) }
+        composable("library/missing") { com.lightningds.app.ui.library.MissingInfoScreen() }
+        composable("edit/files/{id}") { com.lightningds.app.ui.library.WriteFilesScreen(it.arg("id")) }
         composable("group/{tab}/{key}") { e ->
             GroupScreen(runCatching { LibraryTab.valueOf(e.arg("tab")) }.getOrDefault(LibraryTab.ARTISTS), e.arg("key"))
         }
