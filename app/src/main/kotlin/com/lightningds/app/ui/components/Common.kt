@@ -74,7 +74,8 @@ val LocalController = staticCompositionLocalOf<AppController> { error("No AppCon
 /** What the player is on right now, so track lists can highlight it. */
 data class NowPlayingKey(val uri: String?, val id: String?, val title: String?, val playing: Boolean) {
     fun matches(t: Track): Boolean {
-        if (uri != null && t.uri != null && samePath(uri, t.uri)) return true
+        val trackUri = t.uri
+        if (uri != null && trackUri != null && samePath(uri, trackUri)) return true
         return id != null && id == t.id && !title.isNullOrBlank() && title == t.title
     }
 
