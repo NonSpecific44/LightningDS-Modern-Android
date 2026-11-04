@@ -230,7 +230,8 @@ class AppController(private val context: Context) {
         }
         current?.close()
         if (!dev.isRenderer) { _renderer.value = null; return }
-        val r: Renderer = if (dev.isOpenHomeRenderer) OpenHomeRenderer(dev, controlPoint.events, ioScope)
+        // Poll only while the app is on screen; events keep things roughly current otherwise.
+        val r: Renderer = if (dev.isOpenHomeRenderer) OpenHomeRenderer(dev, controlPoint.events, ioScope, pollWhile = { started })
         else UpnpAvRenderer(dev, controlPoint.events, ioScope)
         r.start()
         _renderer.value = r

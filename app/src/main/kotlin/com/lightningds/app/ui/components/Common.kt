@@ -21,6 +21,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.SkipNext
@@ -68,6 +70,23 @@ import com.lightningds.core.media.formatDuration
 import com.lightningds.core.renderer.InsertMode
 
 val LocalController = staticCompositionLocalOf<AppController> { error("No AppController") }
+
+/** What the player is on right now, so track lists can highlight it. */
+data class NowPlayingKey(val uri: String?, val id: String?, val title: String?, val playing: Boolean) {
+    fun matches(t: Track): Boolean {
+        if (uri != null && t.uri != null && samePath(uri, t.uri)) return true
+        return id != null && id == t.id && !title.isNullOrBlank() && title == t.title
+    }
+
+    private fun samePath(a: String, b: String): Boolean {
+        if (a == b) return true
+        // The server may hand out its address in different forms; compare path and query only.
+        fun strip(u: String) = u.substringAfter("://").substringAfter('/', "")
+        return strip(a).isNotEmpty() && strip(a) == strip(b)
+    }
+}
+
+val LocalNowPlaying = androidx.compose.runtime.compositionLocalOf<NowPlayingKey?> { null }
 
 /** Navigation callbacks shared by all screens. */
 class Navigator(val navigate: (String) -> Unit, val back: () -> Unit)
@@ -175,25 +194,30 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     index: Int? = null,
     showArt: Boolean = false,
-    playing: Boolean = false,
+    playing: Boolean? = null,
     menu: List<MenuAction> = emptyList(),
     subtitle: String? = null,
 ) {
+    // Unless the caller decides (the queue does, by entry id), highlight the player's current track.
+    val nowPlaying = LocalNowPlaying.current
+    val current = playing ?: (nowPlaying?.matches(track) == true)
+    val active = current && (playing != null || nowPlaying?.playing == true)
     ListItem(
         modifier = modifier.clickable(onClick = onClick),
-        colors = if (playing) ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else ListItemDefaults.colors(),
+        colors = if (current) ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else ListItemDefaults.colors(),
         leadingContent = when {
             showArt -> ({ Artwork(track.albumArtUri, size = 48.dp, placeholder = Icons.Default.MusicNote) })
             index != null -> ({
                 Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) {
-                    if (playing) Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
+                    if (current) Icon(if (active) Icons.Default.GraphicEq else Icons.Default.Pause, null, tint = MaterialTheme.colorScheme.primary)
                     else Text(index.toString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             })
             else -> null
         },
         headlineContent = {
-            Text(track.title.ifBlank { track.uri.orEmpty() }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (playing) FontWeight.SemiBold else null)
+            Text(track.title.ifBlank { track.uri.orEmpty() }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (current) FontWeight.SemiBold else null,
+                color = if (current) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Unspecified)
         },
         supportingContent = {
             val s = subtitle ?: listOfNotNull(track.displayArtist.ifBlank { null }, track.album?.takeIf { showArt }).joinToString(" · ")
@@ -201,6 +225,7 @@ fun TrackRow(
         },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (current && showArt) Icon(if (active) Icons.Default.GraphicEq else Icons.Default.Pause, null, Modifier.padding(end = 6.dp), tint = MaterialTheme.colorScheme.primary)
                 if (track.durationSeconds > 0) {
                     Text(formatDuration(track.durationSeconds), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

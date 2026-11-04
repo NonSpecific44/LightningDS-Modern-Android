@@ -155,7 +155,13 @@ fun LightningAppUi() {
     UpdateDialogHost()
     if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false }, onSettings = { showDevices = false; navigator.navigate("settings") })
 
-    androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator) {
+    val rendererState by c.rendererState.collectAsStateCompat()
+    val nowPlaying = rendererState?.let { st ->
+        val src = st.currentSource
+        if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) null
+        else com.lightningds.app.ui.components.NowPlayingKey(st.trackUri ?: st.track?.uri, st.track?.id, st.track?.title, st.isPlaying)
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator, com.lightningds.app.ui.components.LocalNowPlaying provides nowPlaying) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val expanded = maxWidth >= 1000.dp
             NavigationSuiteScaffold(
