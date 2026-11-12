@@ -12,6 +12,8 @@ coreKtx = "1.16.0"
 datastore = "1.1.7"
 coil = "3.2.0"
 junit = "4.13.2"
+jaudiotagger = "3.0.1"
+smbj = "0.14.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -37,6 +39,8 @@ compose-material-icons-extended = { module = "androidx.compose.material:material
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 junit = { module = "junit:junit", version.ref = "junit" }
+jaudiotagger = { module = "net.jthink:jaudiotagger", version.ref = "jaudiotagger" }
+smbj = { module = "com.hierynomus:smbj", version.ref = "smbj" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

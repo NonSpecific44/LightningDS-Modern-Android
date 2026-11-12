@@ -22,10 +22,13 @@ Everything from the original app, rebuilt with Material 3 (Jetpack Compose):
 
 | Area | What you can do |
 |---|---|
-| **Devices** | Automatic discovery (SSDP), player and library picker, passcode‑locked devices, standby, source switching |
-| **Now playing** | Artwork, track info, codec / bit depth / sample rate / bitrate, seek, play/pause/next/previous, shuffle, repeat, volume and mute |
+| **Devices** | Automatic discovery (SSDP), player and library picker, passcode‑locked devices, power on/off (standby) from the top bar, device picker or Now Playing, source switching |
+| **Now playing** | Artwork, track info (tap the album name to open the album), codec / bit depth / sample rate / bitrate, seek, play/pause/next/previous, shuffle, repeat, volume and mute |
 | **Queue** | View, play any entry, reorder, remove, clear, save as playlist |
-| **Music library** | Imports the Lightning Server (or any DLNA server) library and browses it by Album, Artist, Composer, Genre, Date, File type, Sampling rate or Song, A→Z / Z→A; folder browsing; Play now / Add next / Add later / Replace queue |
+| **Music library** | Imports the Lightning Server (or any DLNA server) library and browses it by Album, Artist, Composer, Genre, Date, File type, Sampling rate or Song, sorted by title, artist, release year, date added, date modified, length or number of tracks (either direction); the music library is picked automatically when you choose a Lightning player; folder browsing; Play now / Add next / Add later / Replace queue |
+| **Metadata editing** | Fix album title, artist, year, genre, track titles/numbers and cover art; look albums up on MusicBrainz with cover art from the Cover Art Archive; choose a cover from the phone or an image URL; *Fix missing info* lists incomplete albums and can find missing covers automatically. Edits are stored in the app (servers don't accept metadata changes) |
+| **Write tags to files** | Over SMB (the shared folder you'd open from Windows), the app writes your edits into the files themselves (FLAC, MP3, M4A/ALAC, WAV, AIFF, DSF, OGG…), optionally embedding the cover and saving folder.jpg, then asks Lightning Server to rescan. It finds the album's folder and matches files by size, track number or order |
+| **Updates** | Checks this repository's GitHub releases (when the repository is public) and installs new versions from inside the app |
 | **Collection & playlists** | Star albums into your Collection; create, rename, reorder and delete playlists |
 | **Streaming** | TIDAL (successor of WiMP) and Qobuz: featured, genres, favorites, playlists, purchases (Qobuz), search, album/artist/playlist pages, add/remove favorites |
 | **Radio** | Most recent, favorites, popular, genres, location and search |

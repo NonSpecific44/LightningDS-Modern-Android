@@ -13,8 +13,8 @@ android {
         applicationId = "com.lightningds.modern"
         minSdk = 26
         targetSdk = 36
-        versionCode = 200
-        versionName = "2.0.0"
+        versionCode = 214
+        versionName = "2.1.4"
     }
 
     signingConfigs {
@@ -51,7 +51,15 @@ android {
     }
 
     packaging {
-        resources.excludes += setOf("META-INF/{AL2.0,LGPL2.1}", "META-INF/versions/9/previous-compilation-data.bin")
+        resources.excludes += setOf(
+            "META-INF/{AL2.0,LGPL2.1}",
+            "META-INF/versions/9/previous-compilation-data.bin",
+            "META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+            "META-INF/DEPENDENCIES",
+            "META-INF/LICENSE*",
+            "META-INF/NOTICE*",
+            "META-INF/INDEX.LIST",
+        )
     }
 }
 

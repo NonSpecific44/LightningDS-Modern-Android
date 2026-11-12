@@ -20,7 +20,12 @@ data class Album(
     val date: String? = null,
     val artUri: String? = null,
     val tracks: List<Track> = emptyList(),
+    /** When this app first imported the album (used for "date added" when the server has none). */
+    val addedAt: Long = 0,
 ) {
+    /** When the album arrived in the library: the server's import date, else when the app first saw it. */
+    val importedAt: Long get() = tracks.maxOfOrNull { parseDateMillis(it.importDate) } ?.takeIf { it > 0 } ?: addedAt
+    val modifiedAt: Long get() = tracks.maxOfOrNull { parseDateMillis(it.modifyDate) } ?: 0L
     val year: String? get() = date?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
     val durationSeconds: Int get() = tracks.sumOf { it.durationSeconds }
     val displayArtist: String get() = artist ?: tracks.firstNotNullOfOrNull { it.albumArtist ?: it.artist } ?: ""
@@ -33,8 +38,35 @@ data class Library(
     val albums: List<Album>,
     val scanVersion: String = "",
     val updatedAt: Long = System.currentTimeMillis(),
+    /** Cache format version; older caches are re-imported in the background. */
+    val schema: Int = 1,
 ) {
     val tracks: List<Track> get() = albums.flatMap { it.tracks }
+
+    companion object {
+        /** Bumped when imports gain new fields (2: import/modify dates and date added). */
+        const val SCHEMA = 2
+    }
+}
+
+/** Parses the date formats servers use (epoch seconds/ms, ISO 8601, "yyyy-MM-dd HH:mm:ss"); 0 if unknown. */
+fun parseDateMillis(text: String?): Long {
+    val s = text?.trim().orEmpty()
+    if (s.isEmpty()) return 0
+    s.toLongOrNull()?.let { n -> return if (n > 100_000_000_000L) n else n * 1000 }
+    val iso = s.replace(' ', 'T').replace('/', '-')
+    runCatching { return java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
+    runCatching { return java.time.Instant.parse(iso).toEpochMilli() }
+    runCatching { return java.time.LocalDateTime.parse(iso).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
+    runCatching { return java.time.LocalDate.parse(iso.take(10)).atStartOfDay().toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
+    return 0
+}
+
+/** Library sort orders. Date and length sorts read naturally newest/longest first. */
+enum class LibrarySort { TITLE, ARTIST, YEAR, DATE_ADDED, DATE_MODIFIED, DURATION, TRACK_COUNT;
+
+    /** Whether "descending" is the natural default for this sort. */
+    val prefersDescending: Boolean get() = this != TITLE && this != ARTIST
 }
 
 /** The grouping categories offered by the library view (same as the original app). */
@@ -45,7 +77,7 @@ data class LibraryGroup(val key: String, val albums: List<Album>) {
 }
 
 object LibraryIndex {
-    fun group(library: Library, category: LibraryCategory, descending: Boolean = false): List<LibraryGroup> {
+    fun group(library: Library, category: LibraryCategory, descending: Boolean = false, sort: LibrarySort = LibrarySort.TITLE): List<LibraryGroup> {
         val map = LinkedHashMap<String, MutableSet<Album>>()
         fun add(key: String?, album: Album) {
             val k = key?.trim().takeUnless { it.isNullOrEmpty() } ?: UNKNOWN
@@ -71,25 +103,64 @@ object LibraryIndex {
                 LibraryCategory.ALBUMS, LibraryCategory.SONGS -> add(album.title, album)
             }
         }
-        val comparator = if (category == LibraryCategory.SAMPLING_RATE) {
-            compareBy<LibraryGroup> { rateSortKey(it.key) }
+        val byName: Comparator<LibraryGroup> = if (category == LibraryCategory.SAMPLING_RATE) {
+            compareBy { rateSortKey(it.key) }
         } else {
             compareBy(String.CASE_INSENSITIVE_ORDER) { sortKey(it.key) }
         }
-        val list = map.map { (k, v) -> LibraryGroup(k, v.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { sortKey(it.title) })) }
-            .sortedWith(comparator)
-        return if (descending) list.reversed() else list
+        // Groups follow the chosen sort through their albums (e.g. most recently added first).
+        val primary: Comparator<LibraryGroup> = when (sort) {
+            LibrarySort.TITLE, LibrarySort.ARTIST -> byName
+            LibrarySort.YEAR -> compareBy { g -> g.albums.maxOfOrNull { yearOf(it) } ?: 0 }
+            LibrarySort.DATE_ADDED -> compareBy { g -> g.albums.maxOfOrNull { it.importedAt } ?: 0L }
+            LibrarySort.DATE_MODIFIED -> compareBy { g -> g.albums.maxOfOrNull { it.modifiedAt } ?: 0L }
+            LibrarySort.DURATION -> compareBy { g -> g.albums.sumOf { it.durationSeconds } }
+            LibrarySort.TRACK_COUNT -> compareBy { g -> g.albums.size }
+        }
+        val albumOrder = albumComparator(sort, descending)
+        val groups = map.map { (k, v) -> LibraryGroup(k, v.sortedWith(albumOrder)) }
+        return groups.sortedWith((if (descending) primary.reversed() else primary).then(byName))
     }
 
-    fun sortedAlbums(library: Library, descending: Boolean): List<Album> {
-        val l = library.albums.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { sortKey(it.title) })
-        return if (descending) l.reversed() else l
+    private fun yearOf(a: Album): Int = (a.year ?: a.tracks.firstNotNullOfOrNull { t -> t.date?.take(4) })?.toIntOrNull() ?: 0
+
+    private val byTitle: Comparator<Album> = compareBy(String.CASE_INSENSITIVE_ORDER) { sortKey(it.title) }
+
+    /** Album order for [sort]; ties fall back to the title, always A to Z. */
+    fun albumComparator(sort: LibrarySort, descending: Boolean): Comparator<Album> {
+        val primary: Comparator<Album> = when (sort) {
+            LibrarySort.TITLE -> byTitle
+            LibrarySort.ARTIST -> compareBy<Album, String>(String.CASE_INSENSITIVE_ORDER) { sortKey(it.displayArtist) }.thenBy { yearOf(it) }
+            LibrarySort.YEAR -> compareBy { yearOf(it) }
+            LibrarySort.DATE_ADDED -> compareBy { it.importedAt }
+            LibrarySort.DATE_MODIFIED -> compareBy { it.modifiedAt }
+            LibrarySort.DURATION -> compareBy { it.durationSeconds }
+            LibrarySort.TRACK_COUNT -> compareBy { it.tracks.size }
+        }
+        return (if (descending) primary.reversed() else primary).then(byTitle)
     }
 
-    fun sortedTracks(library: Library, descending: Boolean): List<Track> {
-        val l = library.tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { sortKey(it.title) })
-        return if (descending) l.reversed() else l
+    fun sortedAlbums(library: Library, descending: Boolean, sort: LibrarySort = LibrarySort.TITLE): List<Album> =
+        library.albums.sortedWith(albumComparator(sort, descending))
+
+    fun sortedTracks(library: Library, descending: Boolean, sort: LibrarySort = LibrarySort.TITLE): List<Track> {
+        val pairs = library.albums.flatMap { a -> a.tracks.map { a to it } }
+        val title = compareBy<Pair<Album, Track>, String>(String.CASE_INSENSITIVE_ORDER) { sortKey(it.second.title) }
+        val inAlbum = compareBy<Pair<Album, Track>>({ it.second.discNumber }, { it.second.trackNumber })
+        val primary: Comparator<Pair<Album, Track>> = when (sort) {
+            LibrarySort.TITLE -> title
+            LibrarySort.ARTIST -> compareBy<Pair<Album, Track>, String>(String.CASE_INSENSITIVE_ORDER) { sortKey(it.second.displayArtist) }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.first.title }.then(inAlbum)
+            LibrarySort.YEAR -> compareBy { (it.second.date?.take(4)?.toIntOrNull() ?: yearOf(it.first)) }
+            LibrarySort.DATE_ADDED -> compareBy { parseDateMillis(it.second.importDate).takeIf { d -> d > 0 } ?: it.first.addedAt }
+            LibrarySort.DATE_MODIFIED -> compareBy { parseDateMillis(it.second.modifyDate) }
+            LibrarySort.DURATION -> compareBy { it.second.durationSeconds }
+            // Not meaningful per song: keep album order.
+            LibrarySort.TRACK_COUNT -> compareBy<Pair<Album, Track>, String>(String.CASE_INSENSITIVE_ORDER) { it.first.title }.then(inAlbum)
+        }
+        return pairs.sortedWith((if (descending) primary.reversed() else primary).then(title)).map { it.second }
     }
+
 
     fun search(library: Library, query: String): SearchHits {
         val q = query.trim()
@@ -138,7 +209,12 @@ sealed interface SyncProgress {
  * Imports a media server's music library: locates the "all albums" container, then fetches every
  * album with its tracks. This is how the original app built its local library index.
  */
-class LibrarySync(private val cd: ContentDirectory, private val serverName: String) {
+class LibrarySync(
+    private val cd: ContentDirectory,
+    private val serverName: String,
+    /** The previous import of the same server, so albums keep the date the app first saw them. */
+    private val previous: Library? = null,
+) {
 
     suspend fun run(progress: (SyncProgress) -> Unit): Library {
         progress(SyncProgress.Searching("Searching albums…"))
@@ -159,7 +235,10 @@ class LibrarySync(private val cd: ContentDirectory, private val serverName: Stri
             albumsFromTrackSearch(progress)
         }
         val scan = ""
-        return Library(cd.serverUdn, serverName, albums.filter { it.tracks.isNotEmpty() }, scan)
+        val now = System.currentTimeMillis()
+        val seen = previous?.albums?.associate { it.id to it.addedAt }.orEmpty()
+        val dated = albums.filter { it.tracks.isNotEmpty() }.map { a -> a.copy(addedAt = seen[a.id]?.takeIf { it > 0 } ?: now) }
+        return Library(cd.serverUdn, serverName, dated, scan, schema = Library.SCHEMA)
     }
 
     private suspend fun fetchTracks(containers: List<Container>, progress: (SyncProgress) -> Unit): List<Album> = coroutineScope {

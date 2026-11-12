@@ -150,3 +150,45 @@ class LibraryCache(private val dir: File) {
 
     fun sizeBytes(): Long = dir.listFiles()?.filter { it.name.startsWith("library_") }?.sumOf { it.length() } ?: 0L
 }
+
+/** Metadata corrections, per media server (servers don't accept writes, so they live here). */
+class MetadataStore(dir: File, scope: CoroutineScope) {
+    private val store = JsonFileStore(
+        File(dir, "metadata_edits.json"),
+        kotlinx.serialization.builtins.MapSerializer(String.serializer(), com.lightningds.core.library.LibraryEdits.serializer()),
+        emptyMap(),
+        scope,
+    )
+    val edits: StateFlow<Map<String, com.lightningds.core.library.LibraryEdits>> = store.value
+
+    fun forServer(udn: String): com.lightningds.core.library.LibraryEdits = edits.value[udn] ?: com.lightningds.core.library.LibraryEdits()
+
+    /** Replaces the album edit (null removes it) and merges track edits (null value removes one). */
+    fun update(
+        udn: String,
+        albumId: String,
+        album: com.lightningds.core.library.AlbumEdit?,
+        tracks: Map<String, com.lightningds.core.library.TrackEdit?>,
+    ) = store.update { all ->
+        val cur = all[udn] ?: com.lightningds.core.library.LibraryEdits()
+        val albums = if (album == null || album == com.lightningds.core.library.AlbumEdit()) cur.albums - albumId else cur.albums + (albumId to album)
+        val trackMap = cur.tracks.toMutableMap()
+        for ((id, e) in tracks) {
+            if (e == null || e == com.lightningds.core.library.TrackEdit()) trackMap.remove(id) else trackMap[id] = e
+        }
+        all + (udn to com.lightningds.core.library.LibraryEdits(albums, trackMap))
+    }
+}
+
+/** Remembers which folder on the SMB share holds each album ("serverUdn|albumId" → path). */
+class AlbumFolderStore(dir: File, scope: CoroutineScope) {
+    private val store = JsonFileStore(
+        File(dir, "album_folders.json"),
+        kotlinx.serialization.builtins.MapSerializer(String.serializer(), String.serializer()),
+        emptyMap(),
+        scope,
+    )
+
+    fun get(udn: String, albumId: String): String? = store.value.value["$udn|$albumId"]
+    fun set(udn: String, albumId: String, path: String) = store.update { it + ("$udn|$albumId" to path) }
+}

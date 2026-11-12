@@ -25,11 +25,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -72,6 +74,8 @@ import com.lightningds.core.library.Album
 import com.lightningds.core.library.Library
 import com.lightningds.core.library.LibraryCategory
 import com.lightningds.core.library.LibraryIndex
+import com.lightningds.core.library.LibrarySort
+import com.lightningds.app.data.sort
 import com.lightningds.core.library.SyncProgress
 import com.lightningds.core.renderer.InsertMode
 
@@ -119,13 +123,16 @@ fun LibraryScreen() {
             }
         }
         Box(Modifier.weight(1f)) {
-            when (tab) {
-                LibraryTab.COLLECTION -> CollectionView()
-                LibraryTab.PLAYLISTS -> PlaylistsView()
-                LibraryTab.FOLDERS -> if (c.contentDirectory() != null) FolderBrowser("0", null) else NoLibrary(state)
-                else -> when (val s = state) {
-                    is LibraryState.Ready -> LibraryContent(s.library, tab, settings.sortDescending, settings.textAlign == AlignPref.CENTER, s.updating)
-                    else -> NoLibrary(s)
+            // A new category or sort order starts at the top: fresh list state per combination.
+            androidx.compose.runtime.key(tab, settings.sort, settings.sortDescending) {
+                when (tab) {
+                    LibraryTab.COLLECTION -> CollectionView()
+                    LibraryTab.PLAYLISTS -> PlaylistsView()
+                    LibraryTab.FOLDERS -> if (c.contentDirectory() != null) FolderBrowser("0", null) else NoLibrary(state)
+                    else -> when (val s = state) {
+                        is LibraryState.Ready -> LibraryContent(s.library, tab, settings.sort, settings.sortDescending, settings.textAlign == AlignPref.CENTER, s.updating)
+                        else -> NoLibrary(s)
+                    }
                 }
             }
         }
@@ -157,8 +164,10 @@ private fun ServerBar() {
                 }
             }
         }
-        IconButton(onClick = { c.settings.setSortDescending(!settings.sortDescending) }) {
-            Icon(Icons.AutoMirrored.Filled.Sort, stringResource(if (settings.sortDescending) R.string.sort_za else R.string.sort_az))
+        SortMenu()
+        val nav = LocalNavigator.current
+        IconButton(onClick = { nav.navigate(EditRoutes.MISSING) }, enabled = server != null) {
+            Icon(Icons.Default.AutoFixHigh, stringResource(R.string.missing_info_title))
         }
         IconButton(onClick = { c.syncLibrary() }, enabled = server != null) { Icon(Icons.Default.Sync, stringResource(R.string.refresh_cache)) }
     }
@@ -210,7 +219,7 @@ fun SyncProgressView(p: SyncProgress?) {
 }
 
 @Composable
-private fun LibraryContent(library: Library, tab: LibraryTab, descending: Boolean, centered: Boolean, updating: Boolean) {
+private fun LibraryContent(library: Library, tab: LibraryTab, sort: LibrarySort, descending: Boolean, centered: Boolean, updating: Boolean) {
     val nav = LocalNavigator.current
     Column {
         if (updating) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -219,14 +228,14 @@ private fun LibraryContent(library: Library, tab: LibraryTab, descending: Boolea
             return
         }
         when (tab) {
-            LibraryTab.ALBUMS -> AlbumGrid(remember(library, descending) { LibraryIndex.sortedAlbums(library, descending) }, centered)
+            LibraryTab.ALBUMS -> AlbumGrid(remember(library, sort, descending) { LibraryIndex.sortedAlbums(library, descending, sort) }, centered)
             LibraryTab.SONGS -> {
-                val tracks = remember(library, descending) { LibraryIndex.sortedTracks(library, descending) }
+                val tracks = remember(library, sort, descending) { LibraryIndex.sortedTracks(library, descending, sort) }
                 SongList(tracks)
             }
             else -> {
                 val cat = tab.category() ?: return
-                val groups = remember(library, cat, descending) { LibraryIndex.group(library, cat, descending) }
+                val groups = remember(library, cat, sort, descending) { LibraryIndex.group(library, cat, descending, sort) }
                 LazyColumn {
                     items(groups, key = { it.key }) { g ->
                         ListItem(
@@ -280,7 +289,9 @@ fun GroupScreen(tab: LibraryTab, key: String) {
     val settings by c.settings.settings.collectAsStateCompat()
     val lib = (state as? LibraryState.Ready)?.library ?: return LoadingBox()
     val cat = tab.category() ?: return
-    val group = remember(lib, cat, key) { LibraryIndex.group(lib, cat).firstOrNull { it.key == key } }
+    val group = remember(lib, cat, key, settings.sort, settings.sortDescending) {
+        LibraryIndex.group(lib, cat, settings.sortDescending, settings.sort).firstOrNull { it.key == key }
+    }
     val albums = group?.albums.orEmpty()
     AlbumGrid(albums, settings.textAlign == AlignPref.CENTER, header = {
         Column(Modifier.padding(6.dp)) {
@@ -295,9 +306,10 @@ fun GroupScreen(tab: LibraryTab, key: String) {
 @Composable
 private fun CollectionView() {
     val c = LocalController.current
+    val settings by c.settings.settings.collectAsStateCompat()
     val albums by c.collection.albums.collectAsStateCompat()
     if (albums.isEmpty()) EmptyState(Icons.Default.Star, stringResource(R.string.collection_hint_empty))
-    else AlbumGrid(albums.sortedBy { it.title.lowercase() })
+    else AlbumGrid(remember(albums, settings.sort, settings.sortDescending) { albums.sortedWith(LibraryIndex.albumComparator(settings.sort, settings.sortDescending)) })
 }
 
 @Composable
@@ -332,3 +344,51 @@ private fun PlaylistsView() {
     }
 }
 
+@Composable
+fun LibrarySort.label(): String = stringResource(
+    when (this) {
+        LibrarySort.TITLE -> R.string.sort_title
+        LibrarySort.ARTIST -> R.string.sort_artist
+        LibrarySort.YEAR -> R.string.sort_year
+        LibrarySort.DATE_ADDED -> R.string.sort_date_added
+        LibrarySort.DATE_MODIFIED -> R.string.sort_date_modified
+        LibrarySort.DURATION -> R.string.sort_duration
+        LibrarySort.TRACK_COUNT -> R.string.sort_track_count
+    }
+)
+
+/** How the current direction reads for [sort], e.g. "Newest first" or "A to Z". */
+@Composable
+fun directionLabel(sort: LibrarySort, descending: Boolean): String = stringResource(
+    when (sort) {
+        LibrarySort.TITLE, LibrarySort.ARTIST -> if (descending) R.string.sort_za else R.string.sort_az
+        LibrarySort.YEAR, LibrarySort.DATE_ADDED, LibrarySort.DATE_MODIFIED -> if (descending) R.string.sort_newest else R.string.sort_oldest
+        LibrarySort.DURATION -> if (descending) R.string.sort_longest else R.string.sort_shortest
+        LibrarySort.TRACK_COUNT -> if (descending) R.string.sort_most else R.string.sort_fewest
+    }
+)
+
+@Composable
+private fun SortMenu() {
+    val c = LocalController.current
+    val settings by c.settings.settings.collectAsStateCompat()
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.AutoMirrored.Filled.Sort, stringResource(R.string.sorting)) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            LibrarySort.entries.forEach { s ->
+                DropdownMenuItem(
+                    text = { Text(s.label()) },
+                    leadingIcon = { androidx.compose.material3.RadioButton(selected = s == settings.sort, onClick = null) },
+                    onClick = { open = false; if (s != settings.sort) c.settings.setLibrarySort(s) },
+                )
+            }
+            androidx.compose.material3.HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(directionLabel(settings.sort, !settings.sortDescending)) },
+                leadingIcon = { Icon(Icons.Default.SwapVert, null) },
+                onClick = { open = false; c.settings.setSortDescending(!settings.sortDescending) },
+            )
+        }
+    }
+}

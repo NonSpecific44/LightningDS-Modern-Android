@@ -28,6 +28,9 @@ class OpenHomeRenderer(
     private val device: UpnpDevice,
     private val events: EventServer,
     private val scope: CoroutineScope,
+    /** Polling backs up GENA events (which can arrive late or be lost); it pauses while this is false. */
+    private val pollWhile: () -> Boolean = { true },
+    private val pollIntervalMs: Long = POLL_INTERVAL_MS,
 ) : Renderer {
     override val udn: String get() = device.udn
 
@@ -48,7 +51,9 @@ class OpenHomeRenderer(
 
     private val subs = mutableListOf<EventServer.EventSubscription>()
     private var ticker: Job? = null
+    private var poller: Job? = null
     private var lastTimeEvent = 0L
+    private var pollCount = 0
 
     override fun start() {
         product?.let { s -> subs += events.subscribe(s) { onProduct(it) } }
@@ -68,6 +73,12 @@ class OpenHomeRenderer(
                 }
             }
         }
+        poller = scope.launch {
+            while (isActive) {
+                delay(pollIntervalMs)
+                if (pollWhile()) poll(full = pollCount++ % 5 == 0)
+            }
+        }
         _state.update { it.copy(connected = true) }
     }
 
@@ -75,6 +86,83 @@ class OpenHomeRenderer(
         subs.forEach { it.cancel() }
         subs.clear()
         ticker?.cancel()
+        poller?.cancel()
+    }
+
+    /**
+     * Reads the playback state directly. Cheap calls every time (position, transport state,
+     * current track id); the track details only when the track changed; sources and volume on
+     * [full] polls.
+     */
+    private suspend fun poll(full: Boolean) {
+        try {
+            time?.let { t ->
+                val r = t.call("Time")
+                lastTimeEvent = System.currentTimeMillis()
+                _state.update { it.copy(duration = r.int("Duration", 1), position = r.int("Seconds", 2)) }
+            }
+            if (full) product?.let { p ->
+                val idx = p.call("SourceIndex").int("Value")
+                val standby = p.call("Standby").bool("Value")
+                _state.update { it.copy(sourceIndex = idx, standby = standby) }
+            }
+            val src = _state.value.currentSource
+            var trackChanged = false
+            when {
+                src?.isRadio == true -> (internetRadio ?: radio)?.let { r ->
+                    val ts = TransportState.from(r.call("TransportState").get("Value", 0))
+                    _state.update { it.copy(radioTransport = ts) }
+                    trackChanged = true // stream titles change without an id
+                }
+                src?.isReceiver == true -> receiver?.let { r ->
+                    _state.update { it.copy(receiverTransport = TransportState.from(r.call("TransportState").get("Value", 0))) }
+                    trackChanged = true
+                }
+                else -> playlist?.let { p ->
+                    val ts = TransportState.from(p.call("TransportState").get("Value", 0))
+                    val id = p.call("Id").int("Value")
+                    trackChanged = id != _state.value.currentId || _state.value.trackUri.isNullOrEmpty()
+                    _state.update { it.copy(transport = ts, currentId = id) }
+                }
+            }
+            if ((trackChanged || full) && info != null) {
+                val tr = info.call("Track")
+                val uri = tr.get("Uri", 0)
+                if (uri != _state.value.trackUri || full) {
+                    val d = info.call("Details")
+                    _state.update {
+                        it.copy(
+                            trackUri = uri,
+                            track = Didl.parseFirstItem(tr.get("Metadata", 1)) ?: it.track.takeIf { _ -> uri == it.trackUri },
+                            details = StreamDetails(d.int("Duration", 0), d.int("BitRate", 1), d.int("BitDepth", 2), d.int("SampleRate", 3), d.bool("Lossless", 4), d.get("CodecName", 5)),
+                        )
+                    }
+                }
+                if (src?.isRadio == true || full) {
+                    val mt = info.call("Metatext").get("Value", 0)
+                    _state.update { it.copy(metatext = mt.ifBlank { null }) }
+                }
+            }
+            if (full && volumeSvc != null) {
+                val v = volumeSvc.call("Volume").int("Value")
+                val m = volumeSvc.call("Mute").bool("Value")
+                _state.update { it.copy(volume = v, mute = m) }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Device busy or briefly unreachable: the next poll or event catches up.
+        }
+    }
+
+    /** After a command, read the result back quickly instead of waiting for the event. */
+    private fun refreshSoon(full: Boolean = false) {
+        scope.launch {
+            delay(350)
+            poll(full = full)
+            delay(1200)
+            poll(full = full)
+        }
     }
 
     private suspend fun initialFetch() {
@@ -230,22 +318,25 @@ class OpenHomeRenderer(
         }
     }
 
-    override suspend fun play() { activeTransportService()?.call("Play") }
+    override suspend fun play() { activeTransportService()?.call("Play"); refreshSoon() }
     override suspend fun pause() {
         val svc = activeTransportService()
         if (svc == playlist) svc?.call("Pause") else svc?.call("Stop")
+        refreshSoon()
     }
-    override suspend fun stop() { activeTransportService()?.call("Stop") }
-    override suspend fun next() { playlist?.call("Next") }
+    override suspend fun stop() { activeTransportService()?.call("Stop"); refreshSoon() }
+    override suspend fun next() { playlist?.call("Next"); refreshSoon() }
 
     override suspend fun previous() {
         // Same behaviour as the original app: restart the track if we're more than 3s in.
         if (_state.value.position > 3) playlist?.call("SeekSecondAbsolute", "Value" to 0) else playlist?.call("Previous")
+        refreshSoon()
     }
 
     override suspend fun seek(seconds: Int) {
         playlist?.call("SeekSecondAbsolute", "Value" to seconds.coerceAtLeast(0))
         _state.update { it.copy(position = seconds) }
+        refreshSoon()
     }
 
     override suspend fun setVolume(volume: Int) {
@@ -268,11 +359,16 @@ class OpenHomeRenderer(
 
     override suspend fun setShuffle(shuffle: Boolean) { playlist?.call("SetShuffle", "Value" to shuffle) }
     override suspend fun setRepeat(repeat: Boolean) { playlist?.call("SetRepeat", "Value" to repeat) }
-    override suspend fun setStandby(standby: Boolean) { product?.call("SetStandby", "Value" to standby) }
+    override suspend fun setStandby(standby: Boolean) {
+        product?.call("SetStandby", "Value" to standby)
+        _state.update { it.copy(standby = standby) }
+        refreshSoon(full = true)
+    }
 
     override suspend fun selectSource(index: Int) {
         product?.call("SetSourceIndex", "Value" to index)
         _state.update { it.copy(sourceIndex = index) }
+        refreshSoon()
     }
 
     private suspend fun ensureSource(predicate: (RendererSource) -> Boolean) {
@@ -305,6 +401,7 @@ class OpenHomeRenderer(
         val shouldPlay = mode == InsertMode.PLAY_NOW || mode == InsertMode.REPLACE
         if (shouldPlay && firstId > 0) pl.call("SeekId", "Value" to firstId)
         else if (shouldPlay && startAt >= 0) pl.call("Play")
+        if (shouldPlay) refreshSoon()
     }
 
     override suspend fun readQueue(ids: List<Int>): List<QueueEntry> {
@@ -321,6 +418,7 @@ class OpenHomeRenderer(
     override suspend fun playQueueId(id: Int) {
         ensureSource { it.type == RendererSource.PLAYLIST }
         playlist?.call("SeekId", "Value" to id)
+        refreshSoon()
     }
 
     override suspend fun removeQueueId(id: Int) { playlist?.call("DeleteId", "Value" to id) }
@@ -343,6 +441,7 @@ class OpenHomeRenderer(
             radio.call("SetChannel", "Uri" to uri, "Metadata" to meta)
             radio.call("Play")
         }
+        refreshSoon()
     }
 
     override suspend fun playReceiver(uri: String, metadata: Track) {
@@ -361,6 +460,8 @@ class OpenHomeRenderer(
     }
 
     companion object {
+        const val POLL_INTERVAL_MS = 2000L
+
         fun decodeIdArray(base64: String?): List<Int> {
             if (base64.isNullOrBlank()) return emptyList()
             return try {
