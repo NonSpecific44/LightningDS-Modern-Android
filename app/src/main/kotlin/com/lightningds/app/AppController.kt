@@ -320,6 +320,23 @@ class AppController(private val context: Context) {
         }
     }.stateIn(scope, SharingStarted.Eagerly, LibraryState.NoServer)
 
+    /**
+     * The library album a playing track belongs to: by the track's parent container, then by the
+     * track itself, then by album title (and artist when it tells duplicates apart).
+     */
+    fun libraryAlbumFor(track: com.lightningds.core.media.Track): com.lightningds.core.library.Album? {
+        val albums = (library.value as? LibraryState.Ready)?.library?.albums ?: return null
+        track.parentId.takeIf { it.isNotBlank() && it != "0" }?.let { pid -> albums.firstOrNull { it.id == pid }?.let { return it } }
+        if (track.id.isNotBlank()) albums.firstOrNull { a -> a.tracks.any { it.id == track.id } }?.let { return it }
+        val path = track.uri?.substringBefore('?')
+        if (!path.isNullOrBlank()) albums.firstOrNull { a -> a.tracks.any { it.uri?.substringBefore('?') == path } }?.let { return it }
+        val title = track.album?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val byTitle = albums.filter { it.title.equals(title, ignoreCase = true) }
+        if (byTitle.size <= 1) return byTitle.firstOrNull()
+        val artist = (track.albumArtist ?: track.artist)?.trim()
+        return byTitle.firstOrNull { it.artist.equals(artist, ignoreCase = true) } ?: byTitle.first()
+    }
+
     /** The album as the server describes it, without edits (for the edit screen). */
     fun originalAlbum(albumId: String): com.lightningds.core.library.Album? =
         (_library.value as? LibraryState.Ready)?.library?.albums?.firstOrNull { it.id == albumId }

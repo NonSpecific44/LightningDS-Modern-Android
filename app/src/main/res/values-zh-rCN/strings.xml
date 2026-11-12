@@ -444,4 +444,7 @@
     <string name="update_installing">正在安装… 请在下一个界面确认。</string>
     <string name="update_failed">更新失败</string>
     <string name="update_not_public">未找到发布版本。应用内更新需要 GitHub 仓库为公开。</string>
+    <string name="power_on">开机</string>
+    <string name="power_off">关机</string>
+    <string name="device_in_standby">%1$s 处于待机状态。</string>
 </resources>

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Airplay
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -36,6 +37,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
@@ -53,14 +55,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lightningds.app.R
 import com.lightningds.app.ui.components.Artwork
 import com.lightningds.app.ui.components.LocalController
+import com.lightningds.app.ui.components.LocalNavigator
 import com.lightningds.app.ui.components.collectAsStateCompat
 import com.lightningds.core.media.formatDuration
 import com.lightningds.core.media.formatRate
@@ -75,6 +80,9 @@ data class NowPlayingInfo(
     val icon: ImageVector,
     val seekable: Boolean,
     val sourceLabel: String?,
+    /** For queue tracks: the album name shown (and linked) on its own line in the full player. */
+    val album: String? = null,
+    val artist: String? = null,
 )
 
 @Composable
@@ -113,6 +121,8 @@ fun RendererState.info(): NowPlayingInfo {
             icon = Icons.Default.MusicNote,
             seekable = duration > 0,
             sourceLabel = src?.name,
+            album = track.album?.ifBlank { null },
+            artist = track.displayArtist.ifBlank { null },
         )
         else -> NowPlayingInfo(stringResource(R.string.nothing_playing), "", null, Icons.Default.MusicNote, false, src?.name)
     }
@@ -190,6 +200,10 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (s.standby && device?.isOpenHome == true) {
+            StandbyBanner(device?.name ?: s.name, onWake = { c.command { setStandby(false) } })
+            Spacer(Modifier.height(16.dp))
+        }
         Artwork(
             info.art,
             Modifier.widthIn(max = 480.dp).fillMaxWidth().aspectRatio(1f),
@@ -198,7 +212,14 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
         )
         Spacer(Modifier.height(20.dp))
         Text(info.title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (info.subtitle.isNotBlank()) {
+        val albumRoute = albumRouteFor(s)
+        if (info.album != null) {
+            info.artist?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            AlbumLink(info.album, albumRoute)
+        } else if (info.subtitle.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(info.subtitle, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         }
@@ -256,7 +277,7 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
             if (device?.isOpenHome == true) {
                 AssistChip(
                     onClick = { c.command { setStandby(!s.standby) } },
-                    label = { Text(stringResource(if (s.standby) R.string.wake_up else R.string.standby)) },
+                    label = { Text(stringResource(if (s.standby) R.string.power_on else R.string.power_off)) },
                     leadingIcon = { Icon(Icons.Default.PowerSettingsNew, null, Modifier.size(18.dp)) },
                 )
             }
@@ -267,6 +288,75 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                     leadingIcon = { Icon(Icons.Default.QueueMusic, null, Modifier.size(18.dp)) },
                 )
             }
+        }
+    }
+}
+
+/** Where tapping the album name goes: the library album, or the streaming service's album page. */
+@Composable
+private fun albumRouteFor(s: RendererState): String? {
+    val c = LocalController.current
+    val track = s.track ?: return null
+    val src = s.currentSource
+    if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) return null
+    val library by c.library.collectAsStateCompat()
+    return remember(track, library) {
+        val uri = track.uri ?: s.trackUri
+        if (uri != null && uri.startsWith("Streaming://", ignoreCase = true)) {
+            val service = uri.substringAfter("://").substringBefore('?')
+            track.parentId.takeIf { it.isNotBlank() && it != "0" && service.isNotBlank() }
+                ?.let { com.lightningds.app.ui.streaming.StreamRoutes.album(c.streamingService(service).name, it) }
+        } else {
+            c.libraryAlbumFor(track)?.let { com.lightningds.app.ui.library.Routes.album(it.id) }
+        }
+    }
+}
+
+/**
+ * The album name, as a link when the album can be opened. It pushes the album on top of the
+ * player, so Back returns here (only when the album was opened this way).
+ */
+@Composable
+private fun AlbumLink(album: String, route: String?) {
+    val nav = LocalNavigator.current
+    if (route == null) {
+        Text(album, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        return
+    }
+    val label = stringResource(R.string.go_to_album)
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClickLabel = label) { nav.navigate(route) }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Album, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(
+            album,
+            style = MaterialTheme.typography.bodyLarge.copy(textDecoration = TextDecoration.Underline),
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 6.dp).weight(1f, fill = false),
+        )
+    }
+}
+
+@Composable
+private fun StandbyBanner(name: String, onWake: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.PowerSettingsNew, null)
+            Text(
+                stringResource(R.string.device_in_standby, name),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            )
+            FilledTonalButton(onClick = onWake) { Text(stringResource(R.string.power_on)) }
         }
     }
 }

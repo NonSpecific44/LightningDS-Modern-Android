@@ -478,4 +478,7 @@
     <string name="update_installing">Installing… confirm on the next screen.</string>
     <string name="update_failed">Update failed</string>
     <string name="update_not_public">No releases found. In-app updates need the GitHub repository to be public.</string>
+    <string name="power_on">Turn on</string>
+    <string name="power_off">Turn off</string>
+    <string name="device_in_standby">%1$s is in standby.</string>
 </resources>

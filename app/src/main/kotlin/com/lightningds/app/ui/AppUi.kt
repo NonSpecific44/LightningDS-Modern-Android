@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.WifiOff
@@ -59,6 +60,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -200,6 +202,7 @@ fun LightningAppUi() {
                                     }
                                 },
                                 actions = {
+                                    PowerButton()
                                     DeviceChip { showDevices = true }
                                     if (route != "settings") IconButton(onClick = { navigator.navigate("settings") }) { Icon(Icons.Default.Settings, stringResource(R.string.nav_settings)) }
                                 },
@@ -300,6 +303,24 @@ private fun NowPlayingPane(modifier: Modifier) {
     }
 }
 
+/** Turns the selected device on or off (OpenHome standby), like the original iPad app's power button. */
+@Composable
+private fun PowerButton() {
+    val c = LocalController.current
+    val selected by c.selectedRenderer.collectAsStateCompat()
+    val state by c.rendererState.collectAsStateCompat()
+    val s = state ?: return
+    if (selected?.isOpenHome != true) return
+    val on = !s.standby
+    IconButton(onClick = { c.command { setStandby(on) } }) {
+        Icon(
+            Icons.Default.PowerSettingsNew,
+            stringResource(if (on) R.string.power_off else R.string.power_on),
+            tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun DeviceChip(onClick: () -> Unit) {
     val c = LocalController.current
@@ -340,7 +361,7 @@ private fun DevicePickerSheet(onDismiss: () -> Unit, onSettings: () -> Unit) {
                 }
             }
             items(renderers, key = { "r" + it.udn }) { d ->
-                DeviceListItem(d, d.udn == settings.rendererUdn) {
+                DeviceListItem(d, d.udn == settings.rendererUdn, power = d.udn == settings.rendererUdn && d.isOpenHome) {
                     c.selectRenderer(d)
                     onDismiss()
                 }
@@ -358,7 +379,9 @@ private fun DevicePickerSheet(onDismiss: () -> Unit, onSettings: () -> Unit) {
 }
 
 @Composable
-private fun DeviceListItem(d: DeviceItem, selected: Boolean, onClick: () -> Unit) {
+private fun DeviceListItem(d: DeviceItem, selected: Boolean, power: Boolean = false, onClick: () -> Unit) {
+    val c = LocalController.current
+    val state by c.rendererState.collectAsStateCompat()
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { Icon(Icons.Default.Speaker, null, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -366,7 +389,21 @@ private fun DeviceListItem(d: DeviceItem, selected: Boolean, onClick: () -> Unit
         supportingContent = {
             Text(listOfNotNull(d.model, stringResource(if (d.isLightning) R.string.lightning_device else if (d.isOpenHome) R.string.openhome_device else R.string.upnp_device)).joinToString(" · "))
         },
-        trailingContent = { if (d.protected) Icon(Icons.Default.Lock, null) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (d.protected) Icon(Icons.Default.Lock, null)
+                val s = state
+                if (power && s != null) {
+                    val on = !s.standby
+                    androidx.compose.material3.Switch(
+                        checked = on,
+                        onCheckedChange = { v -> c.command { setStandby(!v) } },
+                        thumbContent = { Icon(Icons.Default.PowerSettingsNew, stringResource(if (on) R.string.power_off else R.string.power_on), Modifier.size(16.dp)) },
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+        },
     )
 }
 

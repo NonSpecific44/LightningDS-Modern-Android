@@ -156,12 +156,12 @@ class OpenHomeRenderer(
     }
 
     /** After a command, read the result back quickly instead of waiting for the event. */
-    private fun refreshSoon() {
+    private fun refreshSoon(full: Boolean = false) {
         scope.launch {
             delay(350)
-            poll(full = false)
+            poll(full = full)
             delay(1200)
-            poll(full = false)
+            poll(full = full)
         }
     }
 
@@ -359,7 +359,11 @@ class OpenHomeRenderer(
 
     override suspend fun setShuffle(shuffle: Boolean) { playlist?.call("SetShuffle", "Value" to shuffle) }
     override suspend fun setRepeat(repeat: Boolean) { playlist?.call("SetRepeat", "Value" to repeat) }
-    override suspend fun setStandby(standby: Boolean) { product?.call("SetStandby", "Value" to standby) }
+    override suspend fun setStandby(standby: Boolean) {
+        product?.call("SetStandby", "Value" to standby)
+        _state.update { it.copy(standby = standby) }
+        refreshSoon(full = true)
+    }
 
     override suspend fun selectSource(index: Int) {
         product?.call("SetSourceIndex", "Value" to index)

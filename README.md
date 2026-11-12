@@ -22,8 +22,8 @@ Everything from the original app, rebuilt with Material 3 (Jetpack Compose):
 
 | Area | What you can do |
 |---|---|
-| **Devices** | Automatic discovery (SSDP), player and library picker, passcode‑locked devices, standby, source switching |
-| **Now playing** | Artwork, track info, codec / bit depth / sample rate / bitrate, seek, play/pause/next/previous, shuffle, repeat, volume and mute |
+| **Devices** | Automatic discovery (SSDP), player and library picker, passcode‑locked devices, power on/off (standby) from the top bar, device picker or Now Playing, source switching |
+| **Now playing** | Artwork, track info (tap the album name to open the album), codec / bit depth / sample rate / bitrate, seek, play/pause/next/previous, shuffle, repeat, volume and mute |
 | **Queue** | View, play any entry, reorder, remove, clear, save as playlist |
 | **Music library** | Imports the Lightning Server (or any DLNA server) library and browses it by Album, Artist, Composer, Genre, Date, File type, Sampling rate or Song, sorted by title, artist, release year, date added, date modified, length or number of tracks (either direction); the music library is picked automatically when you choose a Lightning player; folder browsing; Play now / Add next / Add later / Replace queue |
 | **Metadata editing** | Fix album title, artist, year, genre, track titles/numbers and cover art; look albums up on MusicBrainz with cover art from the Cover Art Archive; choose a cover from the phone or an image URL; *Fix missing info* lists incomplete albums and can find missing covers automatically. Edits are stored in the app (servers don't accept metadata changes) |
