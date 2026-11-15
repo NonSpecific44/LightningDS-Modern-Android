@@ -24,12 +24,15 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,6 +62,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -71,9 +75,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.lightningds.app.ConnectionStatus
 import com.lightningds.app.DeviceItem
 import com.lightningds.app.R
-import com.lightningds.app.ui.components.EmptyState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import com.lightningds.app.ui.components.LocalController
 import com.lightningds.app.ui.components.LocalNavigator
 import com.lightningds.app.ui.components.Navigator
@@ -123,22 +130,12 @@ fun LightningAppUi() {
     val route = backStack?.destination?.route
     val snackbar = remember { SnackbarHostState() }
     var showDevices by remember { mutableStateOf(false) }
-    var onWifi by remember { mutableStateOf(c.isOnWifi()) }
 
     LaunchedEffect(Unit) { c.messages.collect { snackbar.showSnackbar(it) } }
 
     if (!settings.onboardingDone) {
         Surface(Modifier.fillMaxSize()) {
             SetupGuide(onFinish = { c.settings.setOnboardingDone(true) })
-        }
-        return
-    }
-    if (!onWifi) {
-        Surface(Modifier.fillMaxSize()) {
-            EmptyState(Icons.Default.WifiOff, stringResource(R.string.no_wifi_title) + "\n\n" + stringResource(R.string.no_wifi_message)) {
-                Button(onClick = { onWifi = c.isOnWifi(); if (onWifi) c.refreshDevices() }) { Text(stringResource(R.string.retry)) }
-                TextButton(onClick = { onWifi = true }) { Text(stringResource(R.string.just_start)) }
-            }
         }
         return
     }
@@ -152,9 +149,21 @@ fun LightningAppUi() {
     val currentTop = topLevel ?: lastTop
 
     PasscodeDialogHost()
+    UpdateDialogHost()
     if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false }, onSettings = { showDevices = false; navigator.navigate("settings") })
 
-    androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator) {
+    // Only the playing track matters here; position/volume updates shouldn't redraw the whole app.
+    val nowPlayingFlow = remember(c) {
+        c.rendererState.map { st ->
+            st?.let {
+                val src = it.currentSource
+                if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) null
+                else com.lightningds.app.ui.components.NowPlayingKey(it.trackUri ?: it.track?.uri, it.track?.id, it.track?.title, it.isPlaying)
+            }
+        }.distinctUntilChanged()
+    }
+    val nowPlaying by nowPlayingFlow.collectAsStateWithLifecycle(initialValue = null)
+    androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator, com.lightningds.app.ui.components.LocalNowPlaying provides nowPlaying) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val expanded = maxWidth >= 1000.dp
             NavigationSuiteScaffold(
@@ -193,6 +202,7 @@ fun LightningAppUi() {
                                     }
                                 },
                                 actions = {
+                                    PowerButton()
                                     DeviceChip { showDevices = true }
                                     if (route != "settings") IconButton(onClick = { navigator.navigate("settings") }) { Icon(Icons.Default.Settings, stringResource(R.string.nav_settings)) }
                                 },
@@ -228,6 +238,9 @@ private fun titleFor(route: String?, entry: NavBackStackEntry?): String = when {
     route == "player" -> stringResource(R.string.now_playing)
     route == "queue" -> stringResource(R.string.queue)
     route == "setup" -> stringResource(R.string.setup_guide)
+    route == "library/missing" -> stringResource(R.string.missing_info_title)
+    route.startsWith("edit/files") -> stringResource(R.string.write_files_title)
+    route.startsWith("edit/") -> stringResource(R.string.edit_info)
     route.startsWith("group/") -> entry?.arg("key").orEmpty()
     route.startsWith("folder/") -> entry?.arg("title").orEmpty()
     route.startsWith("stream/genre/") -> entry?.arg("name").orEmpty()
@@ -255,6 +268,9 @@ private fun AppNavHost(nav: androidx.navigation.NavHostController, expanded: Boo
         composable("queue") { QueueContent(Modifier.fillMaxSize()) }
         composable("setup") { SetupGuide(onFinish = { navigator.back() }) }
         composable("album/{id}") { AlbumScreen(it.arg("id")) }
+        composable("edit/album/{id}") { com.lightningds.app.ui.library.EditAlbumScreen(it.arg("id")) }
+        composable("library/missing") { com.lightningds.app.ui.library.MissingInfoScreen() }
+        composable("edit/files/{id}") { com.lightningds.app.ui.library.WriteFilesScreen(it.arg("id")) }
         composable("group/{tab}/{key}") { e ->
             GroupScreen(runCatching { LibraryTab.valueOf(e.arg("tab")) }.getOrDefault(LibraryTab.ARTISTS), e.arg("key"))
         }
@@ -287,17 +303,58 @@ private fun NowPlayingPane(modifier: Modifier) {
     }
 }
 
+/** Turns the selected device on or off (OpenHome standby), like the original iPad app's power button. */
+@Composable
+private fun PowerButton() {
+    val c = LocalController.current
+    val selected by c.selectedRenderer.collectAsStateCompat()
+    val state by c.rendererState.collectAsStateCompat()
+    val s = state ?: return
+    if (selected?.isOpenHome != true) return
+    val on = !s.standby
+    IconButton(onClick = { c.command { setStandby(on) } }) {
+        Icon(
+            Icons.Default.PowerSettingsNew,
+            stringResource(if (on) R.string.power_off else R.string.power_on),
+            tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun DeviceChip(onClick: () -> Unit) {
     val c = LocalController.current
     val selected by c.selectedRenderer.collectAsStateCompat()
     val state by c.rendererState.collectAsStateCompat()
-    TextButton(onClick = onClick, modifier = Modifier.widthIn(max = 220.dp)) {
-        Icon(Icons.Default.Speaker, null)
-        Text(
-            selected?.name ?: state?.name ?: stringResource(R.string.choose_device),
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp),
-        )
+    val settings by c.settings.settings.collectAsStateCompat()
+    val status by c.connection.collectAsStateCompat()
+    val name = selected?.name ?: settings.rendererName ?: state?.name?.ifBlank { null }
+        ?: stringResource(if (settings.rendererUdn == null) R.string.choose_device else R.string.unknown_device)
+    val problem = status == ConnectionStatus.OFFLINE || status == ConnectionStatus.NO_WIFI
+    val statusText = when (status) {
+        ConnectionStatus.SEARCHING -> stringResource(R.string.status_searching)
+        ConnectionStatus.OFFLINE -> stringResource(R.string.status_offline)
+        ConnectionStatus.NO_WIFI -> stringResource(R.string.status_no_wifi)
+        else -> null
+    }
+    val color = if (problem) MaterialTheme.colorScheme.error else LocalContentColor.current
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.widthIn(max = 220.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary),
+    ) {
+        when (status) {
+            ConnectionStatus.SEARCHING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            ConnectionStatus.NO_WIFI -> Icon(Icons.Default.WifiOff, null)
+            ConnectionStatus.OFFLINE -> Icon(Icons.Default.ErrorOutline, null)
+            else -> Icon(Icons.Default.Speaker, null)
+        }
+        Column(Modifier.padding(start = 6.dp).weight(1f, fill = false)) {
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
+            if (statusText != null) {
+                Text(statusText, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = color)
+            }
+        }
         Icon(Icons.Default.ArrowDropDown, null)
     }
 }
@@ -327,7 +384,7 @@ private fun DevicePickerSheet(onDismiss: () -> Unit, onSettings: () -> Unit) {
                 }
             }
             items(renderers, key = { "r" + it.udn }) { d ->
-                DeviceListItem(d, d.udn == settings.rendererUdn) {
+                DeviceListItem(d, d.udn == settings.rendererUdn, power = d.udn == settings.rendererUdn && d.isOpenHome) {
                     c.selectRenderer(d)
                     onDismiss()
                 }
@@ -345,7 +402,9 @@ private fun DevicePickerSheet(onDismiss: () -> Unit, onSettings: () -> Unit) {
 }
 
 @Composable
-private fun DeviceListItem(d: DeviceItem, selected: Boolean, onClick: () -> Unit) {
+private fun DeviceListItem(d: DeviceItem, selected: Boolean, power: Boolean = false, onClick: () -> Unit) {
+    val c = LocalController.current
+    val state by c.rendererState.collectAsStateCompat()
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { Icon(Icons.Default.Speaker, null, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -353,7 +412,21 @@ private fun DeviceListItem(d: DeviceItem, selected: Boolean, onClick: () -> Unit
         supportingContent = {
             Text(listOfNotNull(d.model, stringResource(if (d.isLightning) R.string.lightning_device else if (d.isOpenHome) R.string.openhome_device else R.string.upnp_device)).joinToString(" · "))
         },
-        trailingContent = { if (d.protected) Icon(Icons.Default.Lock, null) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (d.protected) Icon(Icons.Default.Lock, null)
+                val s = state
+                if (power && s != null) {
+                    val on = !s.standby
+                    androidx.compose.material3.Switch(
+                        checked = on,
+                        onCheckedChange = { v -> c.command { setStandby(!v) } },
+                        thumbContent = { Icon(Icons.Default.PowerSettingsNew, stringResource(if (on) R.string.power_off else R.string.power_on), Modifier.size(16.dp)) },
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+        },
     )
 }
 

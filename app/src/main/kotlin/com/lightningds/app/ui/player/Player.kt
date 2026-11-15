@@ -3,6 +3,9 @@ package com.lightningds.app.ui.player
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Airplay
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -36,6 +40,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
@@ -53,14 +58,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lightningds.app.R
 import com.lightningds.app.ui.components.Artwork
 import com.lightningds.app.ui.components.LocalController
+import com.lightningds.app.ui.components.LocalNavigator
 import com.lightningds.app.ui.components.collectAsStateCompat
 import com.lightningds.core.media.formatDuration
 import com.lightningds.core.media.formatRate
@@ -75,6 +83,9 @@ data class NowPlayingInfo(
     val icon: ImageVector,
     val seekable: Boolean,
     val sourceLabel: String?,
+    /** For queue tracks: the album name shown (and linked) on its own line in the full player. */
+    val album: String? = null,
+    val artist: String? = null,
 )
 
 @Composable
@@ -113,6 +124,8 @@ fun RendererState.info(): NowPlayingInfo {
             icon = Icons.Default.MusicNote,
             seekable = duration > 0,
             sourceLabel = src?.name,
+            album = track.album?.ifBlank { null },
+            artist = track.displayArtist.ifBlank { null },
         )
         else -> NowPlayingInfo(stringResource(R.string.nothing_playing), "", null, Icons.Default.MusicNote, false, src?.name)
     }
@@ -154,7 +167,7 @@ fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun PlayPauseButton(s: RendererState, small: Boolean = false) {
+fun PlayPauseButton(s: RendererState, small: Boolean = false, size: androidx.compose.ui.unit.Dp = 72.dp) {
     val c = LocalController.current
     val playing = s.effectiveTransport == TransportState.PLAYING || s.effectiveTransport == TransportState.BUFFERING
     val streamOnly = s.currentSource?.let { it.isRadio || it.isReceiver } == true
@@ -168,7 +181,7 @@ fun PlayPauseButton(s: RendererState, small: Boolean = false) {
     if (small) {
         IconButton(onClick = action) { Icon(icon, label) }
     } else {
-        FilledIconButton(onClick = action, modifier = Modifier.size(72.dp)) { Icon(icon, label, Modifier.size(40.dp)) }
+        FilledIconButton(onClick = action, modifier = Modifier.size(size)) { Icon(icon, label, Modifier.size(size * 0.55f)) }
     }
 }
 
@@ -181,28 +194,111 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
     val s = state
     if (s == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.no_device_selected), style = MaterialTheme.typography.bodyLarge)
+            val status by c.connection.collectAsStateCompat()
+            val msg = when (status) {
+                com.lightningds.app.ConnectionStatus.SEARCHING -> R.string.status_searching
+                com.lightningds.app.ConnectionStatus.OFFLINE -> R.string.status_offline
+                com.lightningds.app.ConnectionStatus.NO_WIFI -> R.string.status_no_wifi
+                else -> R.string.no_device_selected
+            }
+            Text(stringResource(msg), style = MaterialTheme.typography.bodyLarge)
         }
         return
     }
     val info = s.info()
-    Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Artwork(
-            info.art,
-            Modifier.widthIn(max = 480.dp).fillMaxWidth().aspectRatio(1f),
-            shape = RoundedCornerShape(20.dp),
-            placeholder = info.icon,
-        )
-        Spacer(Modifier.height(20.dp))
-        Text(info.title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (info.subtitle.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(info.subtitle, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+    val banner: @Composable () -> Unit = {
+        if (s.standby && device?.isOpenHome == true) {
+            StandbyBanner(device?.name ?: s.name, onWake = { c.command { setStandby(false) } })
         }
-        QualityChips(s)
+    }
+    // Sized to the screen: the artwork takes whatever room the controls leave, so nothing scrolls.
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // Read here: layout scopes don't allow reaching the outer scope's size from nested blocks.
+        val h = maxHeight
+        val wide = maxWidth > h && maxWidth >= 560.dp
+        when {
+            wide -> Row(
+                Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    NowPlayingArt(info, Modifier.sizeIn(maxWidth = 560.dp, maxHeight = 560.dp).aspectRatio(1f, matchHeightConstraintsFirst = true))
+                }
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    Column(
+                        // Only scrolls on screens too short for the controls themselves.
+                        Modifier.verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        banner()
+                        NowPlayingDetails(
+                            s, info, device?.isOpenHome == true, onOpenQueue,
+                            compact = h < 480.dp, showQuality = h >= 380.dp,
+                        )
+                    }
+                }
+            }
+            h >= 480.dp -> Column(
+                Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                banner()
+                Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    NowPlayingArt(info, Modifier.sizeIn(maxWidth = 480.dp, maxHeight = 480.dp).aspectRatio(1f, matchHeightConstraintsFirst = true))
+                }
+                NowPlayingDetails(s, info, device?.isOpenHome == true, onOpenQueue, compact = h < 700.dp)
+            }
+            // Very short windows (split screen etc.): fall back to scrolling with a smaller cover.
+            else -> Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                banner()
+                NowPlayingArt(info, Modifier.size(h * 0.6f))
+                Spacer(Modifier.height(8.dp))
+                NowPlayingDetails(s, info, device?.isOpenHome == true, onOpenQueue, compact = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingArt(info: NowPlayingInfo, modifier: Modifier) {
+    Artwork(info.art, modifier, shape = RoundedCornerShape(20.dp), placeholder = info.icon)
+}
+
+/** Title, links, seek bar, transport, volume and source/power/queue chips. */
+@Composable
+private fun NowPlayingDetails(
+    s: RendererState,
+    info: NowPlayingInfo,
+    openHome: Boolean,
+    onOpenQueue: (() -> Unit)?,
+    compact: Boolean,
+    showQuality: Boolean = true,
+) {
+    val c = LocalController.current
+    val gap = if (compact) 4.dp else 12.dp
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+        Spacer(Modifier.height(gap))
+        Text(
+            info.title,
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Center, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis,
+        )
+        val albumRoute = albumRouteFor(s)
+        if (info.album != null) {
+            info.artist?.let {
+                Spacer(Modifier.height(2.dp))
+                Text(it, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            AlbumLink(info.album, albumRoute)
+        } else if (info.subtitle.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(info.subtitle, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (showQuality) QualityChips(s, compact)
 
         if (info.seekable) {
             var dragging by remember { mutableStateOf(false) }
@@ -217,15 +313,15 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                     val target = dragValue.toInt()
                     c.command { seek(target) }
                 },
-                modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
             )
-            Row(Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth()) {
                 Text(formatDuration(pos.toInt()), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.weight(1f))
                 Text(formatDuration(s.duration), style = MaterialTheme.typography.labelMedium)
             }
         } else {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(gap))
         }
 
         val queueControls = s.currentSource?.let { it.isRadio || it.isReceiver || it.isAirPlay } != true
@@ -238,7 +334,7 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                     Icon(Icons.Default.SkipPrevious, stringResource(R.string.previous_track), Modifier.size(36.dp))
                 }
             }
-            PlayPauseButton(s)
+            PlayPauseButton(s, size = if (compact) 60.dp else 72.dp)
             if (queueControls) {
                 IconButton(onClick = { c.command { next() } }, modifier = Modifier.size(56.dp)) {
                     Icon(Icons.Default.SkipNext, stringResource(R.string.next_track), Modifier.size(36.dp))
@@ -248,15 +344,15 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        VolumeControl(s, Modifier.widthIn(max = 560.dp).fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(gap))
+        VolumeControl(s, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(if (compact) 0.dp else 4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
             SourceSelector(s)
-            if (device?.isOpenHome == true) {
+            if (openHome) {
                 AssistChip(
                     onClick = { c.command { setStandby(!s.standby) } },
-                    label = { Text(stringResource(if (s.standby) R.string.wake_up else R.string.standby)) },
+                    label = { Text(stringResource(if (s.standby) R.string.power_on else R.string.power_off)) },
                     leadingIcon = { Icon(Icons.Default.PowerSettingsNew, null, Modifier.size(18.dp)) },
                 )
             }
@@ -272,7 +368,75 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
 }
 
 @Composable
-private fun QualityChips(s: RendererState) {
+private fun albumRouteFor(s: RendererState): String? {
+    val c = LocalController.current
+    val track = s.track ?: return null
+    val src = s.currentSource
+    if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) return null
+    val library by c.library.collectAsStateCompat()
+    return remember(track, library) {
+        val uri = track.uri ?: s.trackUri
+        if (uri != null && uri.startsWith("Streaming://", ignoreCase = true)) {
+            val service = uri.substringAfter("://").substringBefore('?')
+            track.parentId.takeIf { it.isNotBlank() && it != "0" && service.isNotBlank() }
+                ?.let { com.lightningds.app.ui.streaming.StreamRoutes.album(c.streamingService(service).name, it) }
+        } else {
+            c.libraryAlbumFor(track)?.let { com.lightningds.app.ui.library.Routes.album(it.id) }
+        }
+    }
+}
+
+/**
+ * The album name, as a link when the album can be opened. It pushes the album on top of the
+ * player, so Back returns here (only when the album was opened this way).
+ */
+@Composable
+private fun AlbumLink(album: String, route: String?) {
+    val nav = LocalNavigator.current
+    if (route == null) {
+        Text(album, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        return
+    }
+    val label = stringResource(R.string.go_to_album)
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClickLabel = label) { nav.navigate(route) }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Album, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(
+            album,
+            style = MaterialTheme.typography.bodyLarge.copy(textDecoration = TextDecoration.Underline),
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 6.dp).weight(1f, fill = false),
+        )
+    }
+}
+
+@Composable
+private fun StandbyBanner(name: String, onWake: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.PowerSettingsNew, null)
+            Text(
+                stringResource(R.string.device_in_standby, name),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            )
+            FilledTonalButton(onClick = onWake) { Text(stringResource(R.string.power_on)) }
+        }
+    }
+}
+
+@Composable
+private fun QualityChips(s: RendererState, compact: Boolean = false) {
     val d = s.details
     val chips = buildList {
         d.codecName.takeIf { it.isNotBlank() }?.let { add(it.uppercase()) }
@@ -281,7 +445,7 @@ private fun QualityChips(s: RendererState) {
         if (d.bitRate > 0) add("${d.bitRate / 1000} kbps")
     }
     if (chips.isEmpty() && !d.lossless) return
-    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.padding(top = if (compact) 2.dp else 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         chips.forEach { SuggestionChip(onClick = {}, label = { Text(it, style = MaterialTheme.typography.labelSmall) }) }
         if (d.lossless) SuggestionChip(onClick = {}, label = { Text(stringResource(R.string.lossless), style = MaterialTheme.typography.labelSmall) })
     }

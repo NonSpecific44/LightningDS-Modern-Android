@@ -46,6 +46,7 @@ class UpnpAvRenderer(
     private var poller: Job? = null
     private var wasPlaying = false
     private var radioMode = false
+    private var failures = 0
 
     override fun start() {
         subs += events.subscribe(avt) { p -> p["LastChange"]?.let { onLastChange(parseLastChange(it)) } }
@@ -101,7 +102,16 @@ class UpnpAvRenderer(
             } else if (ts == TransportState.PLAYING) {
                 wasPlaying = true
             }
-        } catch (_: Exception) {
+            failures = 0
+            if (!_state.value.connected) _state.update { it.copy(connected = true) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (isUnreachable(e)) {
+                if (++failures >= 3 && _state.value.connected) _state.update { it.copy(connected = false) }
+            } else {
+                failures = 0
+            }
         }
     }
 

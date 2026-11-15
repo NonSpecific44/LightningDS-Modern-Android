@@ -120,3 +120,7 @@ interface Renderer {
     suspend fun playRadio(uri: String, metadata: Track)
     suspend fun playReceiver(uri: String, metadata: Track)
 }
+
+/** True for errors meaning the device didn't answer at all (not an error reply from it). */
+internal fun isUnreachable(e: Throwable): Boolean =
+    e is java.io.IOException && e !is com.lightningds.core.upnp.UpnpException

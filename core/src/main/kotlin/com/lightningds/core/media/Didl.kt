@@ -37,6 +37,9 @@ data class Track(
     val sampleFrequency: Int = 0,
     val channels: Int = 0,
     val fileType: String? = null,
+    /** When the file was added to the server's library (Lightning Server provides this). */
+    val importDate: String? = null,
+    val modifyDate: String? = null,
     val upnpClass: String = "object.item.audioItem.musicTrack",
     val source: TrackSource = TrackSource.LIBRARY,
     /** Opaque key identifying the owning server/service (server UDN, "Qobuz", "TIDAL"...). */
@@ -167,6 +170,8 @@ object Didl {
                 "genre" -> if (t.genre == null) t = t.copy(genre = text.ifBlank { null })
                 "date" -> t = t.copy(date = text.ifBlank { null })
                 "originalTrackNumber" -> t = t.copy(trackNumber = text.toIntOrNull() ?: 0)
+                "addedTime", "dateAdded" -> if (t.importDate == null) t = t.copy(importDate = text.ifBlank { null })
+                "modificationTime", "lastModified" -> if (t.modifyDate == null) t = t.copy(modifyDate = text.ifBlank { null })
                 "originalDiscNumber" -> t = t.copy(discNumber = text.toIntOrNull() ?: 0)
                 "albumArtURI" -> if (t.albumArtUri == null) t = t.copy(albumArtUri = text.ifBlank { null })
                 "class" -> t = t.copy(upnpClass = text)
@@ -189,6 +194,8 @@ object Didl {
                     sampleFrequency = (c.attr("samplingRate") ?: c.attr("sampleFrequency"))?.toIntOrNull() ?: t.sampleFrequency,
                     channels = c.attr("nrAudioChannels")?.toIntOrNull() ?: t.channels,
                     fileType = c.attr("fileType") ?: t.fileType,
+                    importDate = c.attr("importDate")?.ifBlank { null } ?: t.importDate,
+                    modifyDate = c.attr("modifyDate")?.ifBlank { null } ?: t.modifyDate,
                 )
             }
         }
