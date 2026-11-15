@@ -74,6 +74,8 @@ import com.lightningds.core.library.Album
 import com.lightningds.core.library.Library
 import com.lightningds.core.library.LibraryCategory
 import com.lightningds.core.library.LibraryIndex
+import com.lightningds.core.library.LibraryGroup
+import com.lightningds.app.ui.components.rememberComputed
 import com.lightningds.core.library.LibrarySort
 import com.lightningds.app.data.sort
 import com.lightningds.core.library.SyncProgress
@@ -228,14 +230,18 @@ private fun LibraryContent(library: Library, tab: LibraryTab, sort: LibrarySort,
             return
         }
         when (tab) {
-            LibraryTab.ALBUMS -> AlbumGrid(remember(library, sort, descending) { LibraryIndex.sortedAlbums(library, descending, sort) }, centered)
+            LibraryTab.ALBUMS -> {
+                val albums = rememberComputed(library, sort, descending) { LibraryIndex.sortedAlbums(library, descending, sort) }
+                if (albums == null) LoadingBox() else AlbumGrid(albums, centered)
+            }
             LibraryTab.SONGS -> {
-                val tracks = remember(library, sort, descending) { LibraryIndex.sortedTracks(library, descending, sort) }
-                SongList(tracks)
+                val tracks = rememberComputed(library, sort, descending) { LibraryIndex.sortedTracks(library, descending, sort) }
+                if (tracks == null) LoadingBox() else SongList(tracks)
             }
             else -> {
                 val cat = tab.category() ?: return
-                val groups = remember(library, cat, sort, descending) { LibraryIndex.group(library, cat, descending, sort) }
+                val groups = rememberComputed(library, cat, sort, descending) { LibraryIndex.group(library, cat, descending, sort) }
+                if (groups == null) { LoadingBox(); return@Column }
                 LazyColumn {
                     items(groups, key = { it.key }) { g ->
                         ListItem(
@@ -289,10 +295,10 @@ fun GroupScreen(tab: LibraryTab, key: String) {
     val settings by c.settings.settings.collectAsStateCompat()
     val lib = (state as? LibraryState.Ready)?.library ?: return LoadingBox()
     val cat = tab.category() ?: return
-    val group = remember(lib, cat, key, settings.sort, settings.sortDescending) {
-        LibraryIndex.group(lib, cat, settings.sortDescending, settings.sort).firstOrNull { it.key == key }
-    }
-    val albums = group?.albums.orEmpty()
+    val group = rememberComputed(lib, cat, key, settings.sort, settings.sortDescending) {
+        LibraryIndex.group(lib, cat, settings.sortDescending, settings.sort).firstOrNull { it.key == key } ?: LibraryGroup(key, emptyList())
+    } ?: return LoadingBox()
+    val albums = group.albums
     AlbumGrid(albums, settings.textAlign == AlignPref.CENTER, header = {
         Column(Modifier.padding(6.dp)) {
             Text(key, style = MaterialTheme.typography.headlineSmall)
@@ -309,7 +315,7 @@ private fun CollectionView() {
     val settings by c.settings.settings.collectAsStateCompat()
     val albums by c.collection.albums.collectAsStateCompat()
     if (albums.isEmpty()) EmptyState(Icons.Default.Star, stringResource(R.string.collection_hint_empty))
-    else AlbumGrid(remember(albums, settings.sort, settings.sortDescending) { albums.sortedWith(LibraryIndex.albumComparator(settings.sort, settings.sortDescending)) })
+    else AlbumGrid(rememberComputed(albums, settings.sort, settings.sortDescending) { albums.sortedWith(LibraryIndex.albumComparator(settings.sort, settings.sortDescending)) } ?: albums)
 }
 
 @Composable

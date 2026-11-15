@@ -426,3 +426,16 @@ fun <T> LoadContent(loader: Loader<T>, modifier: Modifier = Modifier, content: @
     }
 }
 
+/**
+ * Runs [compute] off the main thread (sorting and grouping a big library can take a while) and
+ * returns its result, or null until the first result is ready. Recomputes when [keys] change,
+ * showing the previous result meanwhile.
+ */
+@Composable
+fun <T> rememberComputed(vararg keys: Any?, compute: () -> T): T? {
+    val state = remember { mutableStateOf<T?>(null) }
+    LaunchedEffect(*keys) {
+        state.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { compute() }
+    }
+    return state.value
+}

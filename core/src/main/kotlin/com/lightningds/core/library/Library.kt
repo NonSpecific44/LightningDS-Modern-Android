@@ -54,10 +54,30 @@ fun parseDateMillis(text: String?): Long {
     val s = text?.trim().orEmpty()
     if (s.isEmpty()) return 0
     s.toLongOrNull()?.let { n -> return if (n > 100_000_000_000L) n else n * 1000 }
+    // Sorting by date reads these many times; parsing (and failed parses, which throw) is slow.
+    dateCache[s]?.let { return it }
+    val v = parseDateUncached(s)
+    if (dateCache.size > DATE_CACHE_MAX) dateCache.clear()
+    dateCache[s] = v
+    return v
+}
+
+private const val DATE_CACHE_MAX = 200_000
+private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+private fun parseDateUncached(s: String): Long {
     val iso = s.replace(' ', 'T').replace('/', '-')
-    runCatching { return java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
-    runCatching { return java.time.Instant.parse(iso).toEpochMilli() }
-    runCatching { return java.time.LocalDateTime.parse(iso).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
+    val time = iso.substringAfter('T', "")
+    val hasZone = time.isNotEmpty() && (time.endsWith('Z') || time.endsWith('z') || time.contains('+') || time.contains('-'))
+    // Try the format the text looks like first, so the usual case doesn't throw.
+    if (time.isEmpty()) {
+        runCatching { return java.time.LocalDate.parse(iso.take(10)).atStartOfDay().toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
+    } else if (!hasZone) {
+        runCatching { return java.time.LocalDateTime.parse(iso).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
+    } else {
+        runCatching { return java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
+        runCatching { return java.time.Instant.parse(iso).toEpochMilli() }
+    }
     runCatching { return java.time.LocalDate.parse(iso.take(10)).atStartOfDay().toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
     return 0
 }
@@ -132,8 +152,9 @@ object LibraryIndex {
             LibrarySort.TITLE -> byTitle
             LibrarySort.ARTIST -> compareBy<Album, String>(String.CASE_INSENSITIVE_ORDER) { sortKey(it.displayArtist) }.thenBy { yearOf(it) }
             LibrarySort.YEAR -> compareBy { yearOf(it) }
-            LibrarySort.DATE_ADDED -> compareBy { it.importedAt }
-            LibrarySort.DATE_MODIFIED -> compareBy { it.modifiedAt }
+            // Each album's date is worked out once per sort, not on every comparison.
+            LibrarySort.DATE_ADDED -> java.util.IdentityHashMap<Album, Long>().let { memo -> compareBy { memo.getOrPut(it) { it.importedAt } } }
+            LibrarySort.DATE_MODIFIED -> java.util.IdentityHashMap<Album, Long>().let { memo -> compareBy { memo.getOrPut(it) { it.modifiedAt } } }
             LibrarySort.DURATION -> compareBy { it.durationSeconds }
             LibrarySort.TRACK_COUNT -> compareBy { it.tracks.size }
         }
@@ -152,8 +173,12 @@ object LibraryIndex {
             LibrarySort.ARTIST -> compareBy<Pair<Album, Track>, String>(String.CASE_INSENSITIVE_ORDER) { sortKey(it.second.displayArtist) }
                 .thenBy(String.CASE_INSENSITIVE_ORDER) { it.first.title }.then(inAlbum)
             LibrarySort.YEAR -> compareBy { (it.second.date?.take(4)?.toIntOrNull() ?: yearOf(it.first)) }
-            LibrarySort.DATE_ADDED -> compareBy { parseDateMillis(it.second.importDate).takeIf { d -> d > 0 } ?: it.first.addedAt }
-            LibrarySort.DATE_MODIFIED -> compareBy { parseDateMillis(it.second.modifyDate) }
+            LibrarySort.DATE_ADDED -> java.util.IdentityHashMap<Pair<Album, Track>, Long>().let { memo ->
+                compareBy { memo.getOrPut(it) { parseDateMillis(it.second.importDate).takeIf { d -> d > 0 } ?: it.first.addedAt } }
+            }
+            LibrarySort.DATE_MODIFIED -> java.util.IdentityHashMap<Pair<Album, Track>, Long>().let { memo ->
+                compareBy { memo.getOrPut(it) { parseDateMillis(it.second.modifyDate) } }
+            }
             LibrarySort.DURATION -> compareBy { it.second.durationSeconds }
             // Not meaningful per song: keep album order.
             LibrarySort.TRACK_COUNT -> compareBy<Pair<Album, Track>, String>(String.CASE_INSENSITIVE_ORDER) { it.first.title }.then(inAlbum)

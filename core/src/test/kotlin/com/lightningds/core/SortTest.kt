@@ -32,6 +32,28 @@ class SortTest {
         assertTrue(parseDateMillis("2015/06/01") > 0)
         assertTrue(parseDateMillis("2024-01-15T08:30:00Z") > 0)
         assertEquals(0L, parseDateMillis("not a date"))
+        assertEquals(parseDateMillis("2024-01-15T08:30:00Z"), parseDateMillis("2024-01-15T03:30:00-05:00"))
+        assertEquals(parseDateMillis("2024-01-15T08:30:00Z"), parseDateMillis("2024-01-15T09:30:00+01:00"))
+        assertEquals(parseDateMillis("2024-01-15T08:30:00Z"), parseDateMillis("2024-01-15 08:30:00"))
+        assertEquals(parseDateMillis("2024-01-15T00:00:00"), parseDateMillis("2024-01-15"))
+    }
+
+    /** Date sorts on a big library must stay quick: they run whenever the library screen opens. */
+    @Test
+    fun dateSortsOnLargeLibraryAreFast() {
+        val big = Library("uuid:big", "Big", List(6000) { a ->
+            Album("al$a", "Album $a", "Artist ${a % 400}", tracks = List(12) { t ->
+                Track(id = "al$a-$t", title = "Song $t", importDate = "20%02d-%02d-%02dT%02d:%02d:00".format(a % 25, a % 12 + 1, t + 1, a % 24, t), modifyDate = "2023-01-0${t % 9 + 1} 10:00:00")
+            })
+        })
+        val start = System.nanoTime()
+        LibraryIndex.sortedAlbums(big, true, LibrarySort.DATE_ADDED)
+        LibraryIndex.sortedAlbums(big, true, LibrarySort.DATE_MODIFIED)
+        LibraryIndex.sortedTracks(big, true, LibrarySort.DATE_ADDED)
+        LibraryIndex.group(big, LibraryCategory.ARTISTS, true, LibrarySort.DATE_ADDED)
+        val ms = (System.nanoTime() - start) / 1_000_000
+        println("date sorts on 6000 albums / 72000 tracks: ${ms}ms")
+        assertTrue("took ${ms}ms", ms < 5_000)
     }
 
     @Test

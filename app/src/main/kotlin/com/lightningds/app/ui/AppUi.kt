@@ -78,6 +78,9 @@ import androidx.navigation.compose.rememberNavController
 import com.lightningds.app.ConnectionStatus
 import com.lightningds.app.DeviceItem
 import com.lightningds.app.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import com.lightningds.app.ui.components.LocalController
 import com.lightningds.app.ui.components.LocalNavigator
 import com.lightningds.app.ui.components.Navigator
@@ -149,12 +152,17 @@ fun LightningAppUi() {
     UpdateDialogHost()
     if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false }, onSettings = { showDevices = false; navigator.navigate("settings") })
 
-    val rendererState by c.rendererState.collectAsStateCompat()
-    val nowPlaying = rendererState?.let { st ->
-        val src = st.currentSource
-        if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) null
-        else com.lightningds.app.ui.components.NowPlayingKey(st.trackUri ?: st.track?.uri, st.track?.id, st.track?.title, st.isPlaying)
+    // Only the playing track matters here; position/volume updates shouldn't redraw the whole app.
+    val nowPlayingFlow = remember(c) {
+        c.rendererState.map { st ->
+            st?.let {
+                val src = it.currentSource
+                if (src != null && (src.isRadio || src.isReceiver || src.isAirPlay)) null
+                else com.lightningds.app.ui.components.NowPlayingKey(it.trackUri ?: it.track?.uri, it.track?.id, it.track?.title, it.isPlaying)
+            }
+        }.distinctUntilChanged()
     }
+    val nowPlaying by nowPlayingFlow.collectAsStateWithLifecycle(initialValue = null)
     androidx.compose.runtime.CompositionLocalProvider(LocalNavigator provides navigator, com.lightningds.app.ui.components.LocalNowPlaying provides nowPlaying) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val expanded = maxWidth >= 1000.dp

@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -375,7 +376,7 @@ class AppController(private val context: Context) {
             is LibraryState.Ready -> state.copy(library = com.lightningds.core.library.MetadataEditor.apply(state.library, edits[state.library.serverUdn]))
             else -> state
         }
-    }.stateIn(scope, SharingStarted.Eagerly, LibraryState.NoServer)
+    }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, LibraryState.NoServer)
 
     /**
      * The library album a playing track belongs to: by the track's parent container, then by the
