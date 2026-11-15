@@ -43,7 +43,11 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, player).setSessionActivity(open).build()
+        val built = MediaSession.Builder(this, player).setSessionActivity(open).build()
+        session = built
+        // Register the session straight away so its notification is shown even before any
+        // controller connects (on some phones, e.g. Pixels, nothing else binds to the service).
+        addSession(built)
         scope.launch { controller.rendererState.collect { player.update(it) } }
     }
 
