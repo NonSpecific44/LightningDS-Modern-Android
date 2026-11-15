@@ -198,6 +198,7 @@ class AppController(private val context: Context) {
     private val _searching = MutableStateFlow(true)
     private var searchJob: kotlinx.coroutines.Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var lastNetwork: android.net.Network? = null
 
     private fun startSearching() {
         searchJob?.cancel()
@@ -220,7 +221,14 @@ class AppController(private val context: Context) {
                     if (!was && _onWifi.value) refreshDevices()
                 }
             }
-            override fun onAvailable(network: android.net.Network) = update()
+            override fun onAvailable(network: android.net.Network) {
+                // A different network (e.g. another Wi-Fi): devices found on the old one are
+                // not here, so search again from scratch.
+                val changed = lastNetwork != null && lastNetwork != network
+                lastNetwork = network
+                if (changed) scope.launch { refreshDevices(clear = true) }
+                update()
+            }
             override fun onLost(network: android.net.Network) = update()
             override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) = update()
         }

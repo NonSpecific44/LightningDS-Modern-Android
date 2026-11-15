@@ -48,7 +48,13 @@ class PlaybackService : MediaSessionService() {
         // Register the session straight away so its notification is shown even before any
         // controller connects (on some phones, e.g. Pixels, nothing else binds to the service).
         addSession(built)
-        scope.launch { controller.rendererState.collect { player.update(it) } }
+        // Only while the player can actually be reached: leaving its network (or it going
+        // offline) removes the lock screen / notification player straight away.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(controller.rendererState, controller.connection) { s, conn ->
+                s?.takeIf { conn == ConnectionStatus.CONNECTED && it.connected }
+            }.collect { player.update(it) }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session

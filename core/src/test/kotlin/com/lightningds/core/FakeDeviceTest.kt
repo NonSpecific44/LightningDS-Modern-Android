@@ -199,4 +199,27 @@ class FakeDeviceTest {
             cp.stop()
         }
     }
+
+    @Test
+    fun markedOfflineWhenDeviceStopsAnswering() = runBlocking {
+        val cp = ControlPoint()
+        try {
+            cp.fetch(server.url("/desc.xml").toString())
+            val aries = cp.devices.value["uuid:aries-1"]!!
+            val renderer = OpenHomeRenderer(aries, cp.events, cp.scope, pollIntervalMs = 200)
+            renderer.start()
+            serverTransport = "Playing"
+            var deadline = System.currentTimeMillis() + 10_000
+            while (System.currentTimeMillis() < deadline && renderer.state.value.transport.name != "PLAYING") delay(50)
+            assertTrue(renderer.state.value.connected)
+            // The device disappears (switched off, or we left its network).
+            server.shutdown()
+            deadline = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < deadline && renderer.state.value.connected) delay(50)
+            assertEquals(false, renderer.state.value.connected)
+            renderer.close()
+        } finally {
+            cp.stop()
+        }
+    }
 }

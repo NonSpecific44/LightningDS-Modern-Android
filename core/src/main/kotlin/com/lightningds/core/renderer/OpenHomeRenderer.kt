@@ -54,6 +54,8 @@ class OpenHomeRenderer(
     private var poller: Job? = null
     private var lastTimeEvent = 0L
     private var pollCount = 0
+    private var backgroundTick = 0
+    private var failures = 0
 
     override fun start() {
         product?.let { s -> subs += events.subscribe(s) { onProduct(it) } }
@@ -76,7 +78,10 @@ class OpenHomeRenderer(
         poller = scope.launch {
             while (isActive) {
                 delay(pollIntervalMs)
+                // In the background, a light check every few intervals still notices when the
+                // device goes away (so the lock screen player can be hidden).
                 if (pollWhile()) poll(full = pollCount++ % 5 == 0)
+                else if (backgroundTick++ % BACKGROUND_EVERY == 0) poll(full = false)
             }
         }
         _state.update { it.copy(connected = true) }
@@ -148,10 +153,19 @@ class OpenHomeRenderer(
                 val m = volumeSvc.call("Mute").bool("Value")
                 _state.update { it.copy(volume = v, mute = m) }
             }
+            failures = 0
+            if (!_state.value.connected) _state.update { it.copy(connected = true) }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
-        } catch (_: Exception) {
-            // Device busy or briefly unreachable: the next poll or event catches up.
+        } catch (e: Exception) {
+            // Device busy or briefly unreachable: the next poll or event catches up. Several
+            // network failures in a row mean it has gone (switched off, or we left its network);
+            // an error reply (UpnpException) means it is still there.
+            if (isUnreachable(e)) {
+                if (++failures >= OFFLINE_AFTER_FAILURES && _state.value.connected) _state.update { it.copy(connected = false) }
+            } else {
+                failures = 0
+            }
         }
     }
 
@@ -460,6 +474,8 @@ class OpenHomeRenderer(
     }
 
     companion object {
+        const val OFFLINE_AFTER_FAILURES = 2
+        const val BACKGROUND_EVERY = 5
         const val POLL_INTERVAL_MS = 2000L
 
         fun decodeIdArray(base64: String?): List<Int> {
