@@ -13,8 +13,8 @@ android {
         applicationId = "com.lightningds.modern"
         minSdk = 26
         targetSdk = 36
-        versionCode = 216
-        versionName = "2.1.6"
+        versionCode = 217
+        versionName = "2.1.7"
     }
 
     signingConfigs {

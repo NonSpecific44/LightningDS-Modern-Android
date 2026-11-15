@@ -3,6 +3,9 @@ package com.lightningds.app.ui.player
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -164,7 +167,7 @@ fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun PlayPauseButton(s: RendererState, small: Boolean = false) {
+fun PlayPauseButton(s: RendererState, small: Boolean = false, size: androidx.compose.ui.unit.Dp = 72.dp) {
     val c = LocalController.current
     val playing = s.effectiveTransport == TransportState.PLAYING || s.effectiveTransport == TransportState.BUFFERING
     val streamOnly = s.currentSource?.let { it.isRadio || it.isReceiver } == true
@@ -178,7 +181,7 @@ fun PlayPauseButton(s: RendererState, small: Boolean = false) {
     if (small) {
         IconButton(onClick = action) { Icon(icon, label) }
     } else {
-        FilledIconButton(onClick = action, modifier = Modifier.size(72.dp)) { Icon(icon, label, Modifier.size(40.dp)) }
+        FilledIconButton(onClick = action, modifier = Modifier.size(size)) { Icon(icon, label, Modifier.size(size * 0.55f)) }
     }
 }
 
@@ -203,34 +206,99 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
         return
     }
     val info = s.info()
-    Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    val banner: @Composable () -> Unit = {
         if (s.standby && device?.isOpenHome == true) {
             StandbyBanner(device?.name ?: s.name, onWake = { c.command { setStandby(false) } })
-            Spacer(Modifier.height(16.dp))
         }
-        Artwork(
-            info.art,
-            Modifier.widthIn(max = 480.dp).fillMaxWidth().aspectRatio(1f),
-            shape = RoundedCornerShape(20.dp),
-            placeholder = info.icon,
+    }
+    // Sized to the screen: the artwork takes whatever room the controls leave, so nothing scrolls.
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // Read here: layout scopes don't allow reaching the outer scope's size from nested blocks.
+        val h = maxHeight
+        val wide = maxWidth > h && maxWidth >= 560.dp
+        when {
+            wide -> Row(
+                Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    NowPlayingArt(info, Modifier.sizeIn(maxWidth = 560.dp, maxHeight = 560.dp).aspectRatio(1f, matchHeightConstraintsFirst = true))
+                }
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    Column(
+                        // Only scrolls on screens too short for the controls themselves.
+                        Modifier.verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        banner()
+                        NowPlayingDetails(
+                            s, info, device?.isOpenHome == true, onOpenQueue,
+                            compact = h < 480.dp, showQuality = h >= 380.dp,
+                        )
+                    }
+                }
+            }
+            h >= 480.dp -> Column(
+                Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                banner()
+                Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    NowPlayingArt(info, Modifier.sizeIn(maxWidth = 480.dp, maxHeight = 480.dp).aspectRatio(1f, matchHeightConstraintsFirst = true))
+                }
+                NowPlayingDetails(s, info, device?.isOpenHome == true, onOpenQueue, compact = h < 700.dp)
+            }
+            // Very short windows (split screen etc.): fall back to scrolling with a smaller cover.
+            else -> Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                banner()
+                NowPlayingArt(info, Modifier.size(h * 0.6f))
+                Spacer(Modifier.height(8.dp))
+                NowPlayingDetails(s, info, device?.isOpenHome == true, onOpenQueue, compact = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingArt(info: NowPlayingInfo, modifier: Modifier) {
+    Artwork(info.art, modifier, shape = RoundedCornerShape(20.dp), placeholder = info.icon)
+}
+
+/** Title, links, seek bar, transport, volume and source/power/queue chips. */
+@Composable
+private fun NowPlayingDetails(
+    s: RendererState,
+    info: NowPlayingInfo,
+    openHome: Boolean,
+    onOpenQueue: (() -> Unit)?,
+    compact: Boolean,
+    showQuality: Boolean = true,
+) {
+    val c = LocalController.current
+    val gap = if (compact) 4.dp else 12.dp
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+        Spacer(Modifier.height(gap))
+        Text(
+            info.title,
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Center, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(20.dp))
-        Text(info.title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         val albumRoute = albumRouteFor(s)
         if (info.album != null) {
             info.artist?.let {
-                Spacer(Modifier.height(4.dp))
-                Text(it, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Text(it, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             AlbumLink(info.album, albumRoute)
         } else if (info.subtitle.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(info.subtitle, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            Spacer(Modifier.height(2.dp))
+            Text(info.subtitle, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        QualityChips(s)
+        if (showQuality) QualityChips(s, compact)
 
         if (info.seekable) {
             var dragging by remember { mutableStateOf(false) }
@@ -245,15 +313,15 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                     val target = dragValue.toInt()
                     c.command { seek(target) }
                 },
-                modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
             )
-            Row(Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth()) {
                 Text(formatDuration(pos.toInt()), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.weight(1f))
                 Text(formatDuration(s.duration), style = MaterialTheme.typography.labelMedium)
             }
         } else {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(gap))
         }
 
         val queueControls = s.currentSource?.let { it.isRadio || it.isReceiver || it.isAirPlay } != true
@@ -266,7 +334,7 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                     Icon(Icons.Default.SkipPrevious, stringResource(R.string.previous_track), Modifier.size(36.dp))
                 }
             }
-            PlayPauseButton(s)
+            PlayPauseButton(s, size = if (compact) 60.dp else 72.dp)
             if (queueControls) {
                 IconButton(onClick = { c.command { next() } }, modifier = Modifier.size(56.dp)) {
                     Icon(Icons.Default.SkipNext, stringResource(R.string.next_track), Modifier.size(36.dp))
@@ -276,12 +344,12 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        VolumeControl(s, Modifier.widthIn(max = 560.dp).fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(gap))
+        VolumeControl(s, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(if (compact) 0.dp else 4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
             SourceSelector(s)
-            if (device?.isOpenHome == true) {
+            if (openHome) {
                 AssistChip(
                     onClick = { c.command { setStandby(!s.standby) } },
                     label = { Text(stringResource(if (s.standby) R.string.power_on else R.string.power_off)) },
@@ -299,7 +367,6 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
     }
 }
 
-/** Where tapping the album name goes: the library album, or the streaming service's album page. */
 @Composable
 private fun albumRouteFor(s: RendererState): String? {
     val c = LocalController.current
@@ -369,7 +436,7 @@ private fun StandbyBanner(name: String, onWake: () -> Unit) {
 }
 
 @Composable
-private fun QualityChips(s: RendererState) {
+private fun QualityChips(s: RendererState, compact: Boolean = false) {
     val d = s.details
     val chips = buildList {
         d.codecName.takeIf { it.isNotBlank() }?.let { add(it.uppercase()) }
@@ -378,7 +445,7 @@ private fun QualityChips(s: RendererState) {
         if (d.bitRate > 0) add("${d.bitRate / 1000} kbps")
     }
     if (chips.isEmpty() && !d.lossless) return
-    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.padding(top = if (compact) 2.dp else 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         chips.forEach { SuggestionChip(onClick = {}, label = { Text(it, style = MaterialTheme.typography.labelSmall) }) }
         if (d.lossless) SuggestionChip(onClick = {}, label = { Text(stringResource(R.string.lossless), style = MaterialTheme.typography.labelSmall) })
     }
