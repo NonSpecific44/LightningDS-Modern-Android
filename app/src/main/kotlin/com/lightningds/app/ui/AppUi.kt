@@ -28,9 +28,11 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -73,9 +75,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.lightningds.app.ConnectionStatus
 import com.lightningds.app.DeviceItem
 import com.lightningds.app.R
-import com.lightningds.app.ui.components.EmptyState
 import com.lightningds.app.ui.components.LocalController
 import com.lightningds.app.ui.components.LocalNavigator
 import com.lightningds.app.ui.components.Navigator
@@ -125,22 +127,12 @@ fun LightningAppUi() {
     val route = backStack?.destination?.route
     val snackbar = remember { SnackbarHostState() }
     var showDevices by remember { mutableStateOf(false) }
-    var onWifi by remember { mutableStateOf(c.isOnWifi()) }
 
     LaunchedEffect(Unit) { c.messages.collect { snackbar.showSnackbar(it) } }
 
     if (!settings.onboardingDone) {
         Surface(Modifier.fillMaxSize()) {
             SetupGuide(onFinish = { c.settings.setOnboardingDone(true) })
-        }
-        return
-    }
-    if (!onWifi) {
-        Surface(Modifier.fillMaxSize()) {
-            EmptyState(Icons.Default.WifiOff, stringResource(R.string.no_wifi_title) + "\n\n" + stringResource(R.string.no_wifi_message)) {
-                Button(onClick = { onWifi = c.isOnWifi(); if (onWifi) c.refreshDevices() }) { Text(stringResource(R.string.retry)) }
-                TextButton(onClick = { onWifi = true }) { Text(stringResource(R.string.just_start)) }
-            }
         }
         return
     }
@@ -326,12 +318,35 @@ private fun DeviceChip(onClick: () -> Unit) {
     val c = LocalController.current
     val selected by c.selectedRenderer.collectAsStateCompat()
     val state by c.rendererState.collectAsStateCompat()
-    TextButton(onClick = onClick, modifier = Modifier.widthIn(max = 220.dp)) {
-        Icon(Icons.Default.Speaker, null)
-        Text(
-            selected?.name ?: state?.name ?: stringResource(R.string.choose_device),
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp),
-        )
+    val settings by c.settings.settings.collectAsStateCompat()
+    val status by c.connection.collectAsStateCompat()
+    val name = selected?.name ?: settings.rendererName ?: state?.name?.ifBlank { null }
+        ?: stringResource(if (settings.rendererUdn == null) R.string.choose_device else R.string.unknown_device)
+    val problem = status == ConnectionStatus.OFFLINE || status == ConnectionStatus.NO_WIFI
+    val statusText = when (status) {
+        ConnectionStatus.SEARCHING -> stringResource(R.string.status_searching)
+        ConnectionStatus.OFFLINE -> stringResource(R.string.status_offline)
+        ConnectionStatus.NO_WIFI -> stringResource(R.string.status_no_wifi)
+        else -> null
+    }
+    val color = if (problem) MaterialTheme.colorScheme.error else LocalContentColor.current
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.widthIn(max = 220.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary),
+    ) {
+        when (status) {
+            ConnectionStatus.SEARCHING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            ConnectionStatus.NO_WIFI -> Icon(Icons.Default.WifiOff, null)
+            ConnectionStatus.OFFLINE -> Icon(Icons.Default.ErrorOutline, null)
+            else -> Icon(Icons.Default.Speaker, null)
+        }
+        Column(Modifier.padding(start = 6.dp).weight(1f, fill = false)) {
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
+            if (statusText != null) {
+                Text(statusText, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = color)
+            }
+        }
         Icon(Icons.Default.ArrowDropDown, null)
     }
 }

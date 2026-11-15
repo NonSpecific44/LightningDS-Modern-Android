@@ -23,6 +23,8 @@ enum class TextAlign { START, CENTER }
 
 data class AppSettings(
     val rendererUdn: String? = null,
+    /** The selected player's name, so it can be shown while the player can't be reached. */
+    val rendererName: String? = null,
     val serverUdn: String? = null,
     val sortDescending: Boolean = false,
     val librarySort: String = "TITLE",
@@ -55,6 +57,7 @@ data class AppSettings(
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private object K {
         val renderer = stringPreferencesKey("renderer_udn")
+        val rendererName = stringPreferencesKey("renderer_name")
         val server = stringPreferencesKey("server_udn")
         val sortDesc = booleanPreferencesKey("sort_desc")
         val sort = stringPreferencesKey("library_sort")
@@ -83,6 +86,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
 
     private fun Preferences.toSettings() = AppSettings(
         rendererUdn = this[K.renderer],
+        rendererName = this[K.rendererName],
         serverUdn = this[K.server],
         sortDescending = this[K.sortDesc] ?: false,
         librarySort = this[K.sort] ?: "TITLE",
@@ -127,7 +131,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         if (value == null) remove(key) else this[key] = value
     }
 
-    fun setRenderer(udn: String?) = edit { it.setOrRemove(K.renderer, udn) }
+    fun setRenderer(udn: String?, name: String? = null) = edit {
+        it.setOrRemove(K.renderer, udn)
+        it.setOrRemove(K.rendererName, name)
+    }
     fun setServer(udn: String?) = edit { it.setOrRemove(K.server, udn) }
     fun setSortDescending(v: Boolean) = edit { it[K.sortDesc] = v }
 

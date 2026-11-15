@@ -191,7 +191,14 @@ fun NowPlayingContent(onOpenQueue: (() -> Unit)?, modifier: Modifier = Modifier)
     val s = state
     if (s == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.no_device_selected), style = MaterialTheme.typography.bodyLarge)
+            val status by c.connection.collectAsStateCompat()
+            val msg = when (status) {
+                com.lightningds.app.ConnectionStatus.SEARCHING -> R.string.status_searching
+                com.lightningds.app.ConnectionStatus.OFFLINE -> R.string.status_offline
+                com.lightningds.app.ConnectionStatus.NO_WIFI -> R.string.status_no_wifi
+                else -> R.string.no_device_selected
+            }
+            Text(stringResource(msg), style = MaterialTheme.typography.bodyLarge)
         }
         return
     }

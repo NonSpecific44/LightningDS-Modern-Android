@@ -447,4 +447,8 @@
     <string name="power_on">开机</string>
     <string name="power_off">关机</string>
     <string name="device_in_standby">%1$s 处于待机状态。</string>
+    <string name="unknown_device">播放器</string>
+    <string name="status_searching">正在搜索…</string>
+    <string name="status_offline">无法连接</string>
+    <string name="status_no_wifi">未连接 Wi-Fi</string>
 </resources>

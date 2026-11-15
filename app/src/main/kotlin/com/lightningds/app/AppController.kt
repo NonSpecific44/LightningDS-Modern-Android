@@ -55,6 +55,10 @@ import java.io.File
 import java.net.NetworkInterface
 
 /** A discovered device as shown in device lists. */
+enum class ConnectionStatus { CONNECTED, SEARCHING, OFFLINE, NO_WIFI, NO_DEVICE }
+
+private const val SEARCH_GRACE_MS = 10_000L
+
 data class DeviceItem(
     val udn: String,
     val name: String,
@@ -163,6 +167,8 @@ class AppController(private val context: Context) {
         started = true
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         multicastLock = wifi.createMulticastLock("LightningDS").apply { setReferenceCounted(false); acquire() }
+        watchNetwork()
+        startSearching()
         ioScope.launch { runCatching { controlPoint.start() }.onFailure { toast(it.message ?: "Discovery failed") } }
         val s = settings.current
         if (s.autoUpdateCheck && System.currentTimeMillis() - s.lastUpdateCheck > Updater.CHECK_INTERVAL_MS) {
@@ -179,7 +185,58 @@ class AppController(private val context: Context) {
         started = false
     }
 
-    fun refreshDevices(clear: Boolean = false) = controlPoint.refresh(clear)
+    fun refreshDevices(clear: Boolean = false) {
+        controlPoint.refresh(clear)
+        startSearching()
+    }
+
+    // ---- connection status (shown on the device name in the top bar) ------------------------
+
+    private val _onWifi = MutableStateFlow(true)
+    /** True briefly after discovery starts, so a not-yet-found player shows "Searching" rather than "Offline". */
+    private val _searching = MutableStateFlow(true)
+    private var searchJob: kotlinx.coroutines.Job? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun startSearching() {
+        searchJob?.cancel()
+        _searching.value = true
+        searchJob = scope.launch {
+            kotlinx.coroutines.delay(SEARCH_GRACE_MS)
+            _searching.value = false
+        }
+    }
+
+    private fun watchNetwork() {
+        _onWifi.value = isOnWifi()
+        if (networkCallback != null) return
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            private fun update() {
+                scope.launch {
+                    val was = _onWifi.value
+                    _onWifi.value = isOnWifi()
+                    if (!was && _onWifi.value) refreshDevices()
+                }
+            }
+            override fun onAvailable(network: android.net.Network) = update()
+            override fun onLost(network: android.net.Network) = update()
+            override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) = update()
+        }
+        runCatching { cm.registerDefaultNetworkCallback(cb) }.onSuccess { networkCallback = cb }
+    }
+
+    val connection: StateFlow<ConnectionStatus> = combine(
+        settings.settings, devices, _onWifi, _searching,
+    ) { s, d, wifi, searching ->
+        when {
+            s.rendererUdn == null -> ConnectionStatus.NO_DEVICE
+            !wifi -> ConnectionStatus.NO_WIFI
+            d.any { it.udn == s.rendererUdn } -> ConnectionStatus.CONNECTED
+            searching -> ConnectionStatus.SEARCHING
+            else -> ConnectionStatus.OFFLINE
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, ConnectionStatus.SEARCHING)
 
     fun isOnWifi(): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -255,7 +312,7 @@ class AppController(private val context: Context) {
                 _passcodeRequest.value = PasscodeRequest(item.udn, item.name)
                 return@launch
             }
-            settings.setRenderer(item.udn)
+            settings.setRenderer(item.udn, item.name)
         }
     }
 
@@ -266,7 +323,7 @@ class AppController(private val context: Context) {
             scope.launch {
                 if (ok) {
                     settings.setUnlocked(req.udn, code)
-                    settings.setRenderer(req.udn)
+                    settings.setRenderer(req.udn, req.name)
                     _passcodeRequest.value = null
                 }
                 onResult(ok)

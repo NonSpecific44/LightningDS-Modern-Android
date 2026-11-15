@@ -481,4 +481,8 @@
     <string name="power_on">Turn on</string>
     <string name="power_off">Turn off</string>
     <string name="device_in_standby">%1$s is in standby.</string>
+    <string name="unknown_device">Player</string>
+    <string name="status_searching">Searching…</string>
+    <string name="status_offline">Can\'t connect</string>
+    <string name="status_no_wifi">No Wi-Fi</string>
 </resources>
