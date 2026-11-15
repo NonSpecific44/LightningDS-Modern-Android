@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         controller.onForeground()
+        PlaybackService.start(this)
     }
 
     override fun onStop() {

@@ -92,4 +92,8 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    // Lock screen / notification controls (media session).
+    implementation(libs.media3.session)
+    implementation(libs.media3.common)
 }

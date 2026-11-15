@@ -335,10 +335,11 @@ class AppController(private val context: Context) {
     fun cancelPasscode() { _passcodeRequest.value = null }
 
     /** Runs a renderer command, reporting errors as a message. */
-    fun command(block: suspend Renderer.() -> Unit) {
+    fun command(onDone: (() -> Unit)? = null, block: suspend Renderer.() -> Unit) {
         val r = _renderer.value
         if (r == null) {
             toast(context.getString(R.string.no_device_selected))
+            onDone?.invoke()
             return
         }
         ioScope.launch {
@@ -346,6 +347,8 @@ class AppController(private val context: Context) {
                 r.block()
             } catch (e: Exception) {
                 toast(e.message ?: context.getString(R.string.operation_failed))
+            } finally {
+                onDone?.invoke()
             }
         }
     }
